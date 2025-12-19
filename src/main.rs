@@ -2,10 +2,13 @@ mod config;
 mod net;
 mod web;
 
-use crate::config::Config;
-use crate::web::web_server;
+use crate::{
+    config::Config,
+    web::shared_state::Status,
+    web::{shared_state::AppState, web_server},
+};
 use std::sync::Arc;
-use tokio::net::UdpSocket;
+use tokio::{net::UdpSocket, sync::RwLock};
 use tracing::{error, info, warn};
 
 #[tokio::main]
@@ -15,6 +18,15 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::load();
     info!("Config loaded. Target STUN: {}", config.stun_server);
+
+    let shared_state = Arc::new(RwLock::new(AppState::new(None, Status::Disconnected)));
+
+    let state_clone = Arc::clone(&shared_state);
+    let web = tokio::spawn(async move {
+        if let Err(e) = web_server::serve(state_clone, config.web_port).await {
+            error!("Web server crahsed: {:?}", e);
+        }
+    });
 
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
@@ -27,6 +39,8 @@ async fn main() -> anyhow::Result<()> {
         Ok(public_addr) => {
             info!("STUN Success! Your Public ID is: {}", public_addr);
             info!("Share this address with your peer to connect.");
+            let mut locked_state = shared_state.write().await;
+            locked_state.public_ip = Some(public_addr);
         }
         Err(e) => {
             error!("STUN Failed: {:?}", e);
@@ -34,9 +48,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    if let Err(e) = web_server::serve(config.web_port).await {
-        error!("Web server crahsed: {:?}", e);
-    }
+    web.await?;
 
     Ok(())
 }
