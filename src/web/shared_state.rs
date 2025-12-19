@@ -14,8 +14,14 @@ pub struct AppState {
     ///
     /// This is `None` until the STUN resolution completes.
     pub public_ip: Option<SocketAddr>,
+
     /// The current connectivity status of the P2P node.
     pub status: Status,
+
+    /// IP address of peer client is connecting to
+    ///
+    /// This is `None` until client clicks connect with valid address
+    pub peer_ip: Option<SocketAddr>,
 }
 
 impl AppState {
@@ -25,8 +31,12 @@ impl AppState {
     ///
     /// * `public_ip` - The initial public IP (usually `None` at startup).
     /// * `status` - The initial status (usually `Status::Disconnected`).
-    pub fn new(public_ip: Option<SocketAddr>, status: Status) -> Self {
-        Self { public_ip, status }
+    pub fn new(public_ip: Option<SocketAddr>, status: Status, peer_ip: Option<SocketAddr>) -> Self {
+        Self {
+            public_ip,
+            status,
+            peer_ip,
+        }
     }
 }
 

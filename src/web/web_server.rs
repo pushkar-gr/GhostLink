@@ -14,7 +14,8 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::str::FromStr;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::debug;
 
@@ -96,9 +97,22 @@ struct ConnectionRequest {
 /// # Returns
 /// * `200 OK` - If the connection request was received (process starts asynchronously).
 /// * `422 Unprocessable Entity` - If the JSON input is invalid (wrong types).
-async fn post_peer_ip(Json(input): Json<ConnectionRequest>) -> Result<(), (StatusCode, String)> {
+async fn post_peer_ip(
+    State(state): State<SharedState>,
+    Json(input): Json<ConnectionRequest>,
+) -> Result<(), (StatusCode, String)> {
     debug!("peer to connect: {}:{}", input.ip, input.port);
 
+    let ip_addr = SocketAddr::new(
+        IpAddr::V4(
+            Ipv4Addr::from_str(&input.ip).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
+        ),
+        input.port,
+    );
+    {
+        let mut data = state.write().await;
+        data.peer_ip = Some(ip_addr);
+    }
     // TODO: Pass this information to the P2P networking layer to initiate hole punching.
     // Example: state.write().await.target_peer = Some((input.ip, input.port));
 
@@ -120,7 +134,7 @@ mod tests {
 
     /// Helper to create a fresh state for each test
     fn create_test_state() -> SharedState {
-        Arc::new(RwLock::new(AppState::new(None, Status::Disconnected)))
+        Arc::new(RwLock::new(AppState::new(None, Status::Disconnected, None)))
     }
 
     /// Checks that before STUN runs (when public_ip is None), the `/api/ip` endpoint
