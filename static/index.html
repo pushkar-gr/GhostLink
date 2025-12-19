@@ -1,1 +1,72 @@
-<h1>GhostLinkr V1</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GhostLink | P2P Connection</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <header class="header">
+            <h1>GhostLink</h1>
+            <div class="status-badge" id="statusBadge">
+                <span class="status-dot"></span>
+                <span id="statusText">Disconnected</span>
+            </div>
+        </header>
+
+        <div class="card">
+            <label class="label">Your Public Endpoint</label>
+            <div class="ip-display-group">
+                <span class="ip-text" id="myIpDisplay">Initializing...</span>
+                
+                <div class="action-buttons">
+                    <button class="icon-btn" id="refreshBtn" title="Refresh Public IP">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                    </button>
+                    
+                    <button class="icon-btn" id="copyBtn" title="Copy to Clipboard">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="apiErrorMsg" class="error-msg" style="margin-top: 0.5rem; text-align: center;"></div>
+        </div>
+
+        <div class="card">
+            <label class="label">Connect to Peer</label>
+            <form id="connectForm">
+                <div class="input-row">
+                    <div style="flex: 2;">
+                        <input type="text" id="peerIp" placeholder="192.168.1.1" autocomplete="off">
+                        <div class="error-msg" id="ipError">Invalid IPv4 format</div>
+                    </div>
+                    <div style="flex: 1;">
+                        <input type="number" id="peerPort" placeholder="8080" min="1" max="65535">
+                        <div class="error-msg" id="portError">Invalid Port</div>
+                    </div>
+                </div>
+                <div style="margin-top: 1.5rem;">
+                    <button type="submit" class="btn-primary" disabled>Establish Link</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="toast" id="toast">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        Copied to clipboard
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
