@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let state_clone = Arc::clone(&shared_state);
     let web = tokio::spawn(async move {
         if let Err(e) = web_server::serve(state_clone, config.web_port).await {
-            error!("Web server crahsed: {:?}", e);
+            error!("Web server crashed: {:?}", e);
         }
     });
 
@@ -55,8 +55,16 @@ async fn main() -> anyhow::Result<()> {
         let locked_state = shared_state.read().await;
         locked_state.peer_ip
     };
+
     if let Some(peer_addr) = peer_addr {
-        MessageManager::new(Arc::clone(&socket), peer_addr, config.timeout_secs).await?;
+        //passing shared_state to update ui
+        MessageManager::new(
+            Arc::clone(&socket),
+            peer_addr,
+            Arc::clone(&shared_state),
+            config.timeout_secs,
+        )
+        .await?;
     }
 
     web.await?;
