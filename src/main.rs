@@ -15,7 +15,10 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    dotenv::dotenv().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     info!("GhostLink v1.0 Starting...");
 
     let config = Config::load();
