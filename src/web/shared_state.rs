@@ -22,6 +22,8 @@ pub struct AppState {
     ///
     /// This is `None` until client clicks connect with valid address
     pub peer_ip: Option<SocketAddr>,
+    /// To store logs
+    pub logs: Vec<String>,
 }
 
 impl AppState {
@@ -36,6 +38,7 @@ impl AppState {
             public_ip,
             status,
             peer_ip,
+            logs: Vec::new(),
         }
     }
 }

@@ -17,6 +17,21 @@ enum HandshakeMsg {
     Bye,
 }
 
+/// Helper to append a log to state safely
+async fn add_log(state: &Arc<RwLock<AppState>>, msg: String) {
+    let mut locked = state.write().await;
+    // Optional: Keep log size manageable (e.g., last 50 lines)
+    if locked.logs.len() > 50 {
+        locked.logs.remove(0);
+    }
+    // Add timestamp or just the message
+    locked.logs.push(format!(
+        "[{}] {}",
+        chrono::Local::now().format("%H:%M:%S"),
+        msg
+    ));
+}
+
 /// Performs a UDP hole punching handshake with a remote peer.
 ///
 /// This function tires to establish a bidirectional connection by sending "HELLOW_PUNCH" packets
@@ -43,6 +58,7 @@ pub async fn handshake(
     let start_time = Instant::now();
     let mut send_interval = tokio::time::interval(Duration::from_millis(500));
 
+    add_log(&state, format!("Starting handshake with {}", peer_addr)).await;
     info!("Starting handshake with {}", peer_addr);
 
     // Prevent a burst of ticks when the task is delayed.
@@ -51,6 +67,11 @@ pub async fn handshake(
     loop {
         // Check timeout at every iteration.
         if start_time.elapsed() > timeout {
+            add_log(
+                &state,
+                format!("Handshake timed out after {}s", timeout_secs),
+            )
+            .await;
             bail!("Handshake timed out with {}", peer_addr);
         }
 
@@ -66,16 +87,21 @@ pub async fn handshake(
                             HandshakeMsg::Syn => {
                                 // Peer is punching us -> Reply "SynAck"
                                 info!("Received SYN from {}. Sending SYN-ACK.", sender);
+                                add_log(&state, "Received SYN. Sending SYN-ACK...".to_string()).await;
+
                                 let reply = bincode::serialize(&HandshakeMsg::SynAck)?;
                                 client_socket.send_to(&reply, peer_addr).await?;
                             }
                             HandshakeMsg::SynAck => {
                                 info!("Received SYN-ACK from {}! Connection Established.", sender);
+                                add_log(&state, "Received SYN-ACK! Connection Established.".to_string()).await;
+
                                 let mut locked_state = state.write().await;
                                 locked_state.status = Status::Connected;
                                 return Ok(());
                             }
                             HandshakeMsg::Bye => {
+                                add_log(&state, "Peer rejected connection (BYE).".to_string()).await;
                                 warn!("Peer {} rejected connection (received BYE)", sender);
                                 bail!("Connection rejected by peer");
                             }
@@ -146,6 +172,13 @@ mod tests {
         assert!(result.is_ok());
 
         let locked = state_a.read().await;
+        // Verify logs contain success message
+        assert!(
+            locked
+                .logs
+                .iter()
+                .any(|l| l.contains("Connection Established"))
+        );
         assert_eq!(locked.status, Status::Connected);
     }
 
