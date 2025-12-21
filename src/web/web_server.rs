@@ -4,7 +4,7 @@
 //! 1. The Static UI files (HTML/JS/CSS) from the `static/` directory.
 //! 2. The API endpoints (e.g., status, configuration) for the frontend.
 
-use super::shared_state::{Command, SharedState};
+use super::shared_state::{Command, SharedState, Status};
 use anyhow::Result;
 use axum::{
     Json, Router,
@@ -14,8 +14,10 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::str::FromStr;
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    str::FromStr,
+};
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::debug;
 
@@ -33,7 +35,7 @@ use tracing::debug;
 pub async fn serve(shared_state: SharedState, port: u16) -> Result<()> {
     let app = router(shared_state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     tracing::info!("Web UI available at http://{}", addr);
@@ -101,20 +103,30 @@ async fn post_peer_ip(
     State(state): State<SharedState>,
     Json(input): Json<ConnectionRequest>,
 ) -> Result<(), (StatusCode, String)> {
-    
     debug!("peer to connect: {}:{}", input.ip, input.port);
 
+    // check if peer is allowed to connect
+    if state.read().await.status != Status::Disconnected {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Already connecting/connected to a peer".into(),
+        ));
+    }
+
+    // build SocketAddr
     let ip_addr = SocketAddr::new(
         IpAddr::V4(
             Ipv4Addr::from_str(&input.ip).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?,
         ),
         input.port,
     );
+    // update peer ip to shared state
     {
         let mut data = state.write().await;
         data.peer_ip = Some(ip_addr);
     }
 
+    // send controller `ConnectPeer` command
     let tx = { state.read().await.cmd_tx.clone() };
     if let Err(e) = tx.send(Command::ConnectPeer).await {
         return Err((
@@ -141,7 +153,10 @@ mod tests {
 
     /// Helper to create a fresh state for each test
     fn create_test_state() -> SharedState {
-        let (cmd_tx, _) = mpsc::channel::<Command>(32);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(32);
+        // listen to cmd_rx and do nothing
+        tokio::spawn(async move { while let Some(_cmd) = cmd_rx.recv().await {} });
+
         Arc::new(RwLock::new(AppState::new(
             None,
             Status::Disconnected,
@@ -259,5 +274,67 @@ mod tests {
 
         // 2. Expect 422 Unprocessable Entity (Standard Axum error for bad JSON)
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// Ensures that if the app is already `Punching` or `Connected`,
+    /// a new connection request is rejected with `400 Bad Request`.
+    #[tokio::test]
+    async fn test_post_connect_fails_when_busy() {
+        let state = create_test_state();
+
+        // 1. Simulate that we are already busy
+        {
+            let mut guard = state.write().await;
+            guard.status = Status::_Connected;
+        }
+
+        let app = router(state);
+
+        let payload = json!({
+            "ip": "192.168.1.55",
+            "port": 9000
+        });
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/connect")
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        // 2. Expect rejection
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        // The error message comes as a plain string in the body
+        assert_eq!(body_bytes, "Already connecting/connected to a peer");
+    }
+
+    /// Sends a malformed IP string (e.g., "invalid-ip") to ensure the
+    /// server catches the parsing error and returns `400 Bad Request`.
+    #[tokio::test]
+    async fn test_post_connect_fails_on_invalid_ip() {
+        let state = create_test_state();
+        let app = router(state);
+
+        let payload = json!({
+            "ip": "not-an-ip-address",
+            "port": 9000
+        });
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/connect")
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

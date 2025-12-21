@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
     info!("GhostLink v1.0 Starting...");
 
     let config = Config::load();
-    info!("Config loaded. Target STUN: {}", config.stun_server);
+    info!("Config loaded...");
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(32);
 
@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
     let state_clone = Arc::clone(&shared_state);
     let web = tokio::spawn(async move {
         if let Err(e) = web_server::serve(state_clone, config.web_port).await {
-            error!("Web server crahsed: {:?}", e);
+            error!("Web server crashed: {:?}", e);
         }
     });
 
@@ -55,13 +55,14 @@ async fn start_controller(
     shared_state: &SharedState,
     mut cmd_rx: mpsc::Receiver<Command>,
 ) -> Result<()> {
+    // 1. Bind the UDP Socket
     let socket = UdpSocket::bind(("0.0.0.0", config.client_port)).await?;
-
     let socket = Arc::new(socket);
 
     let local_port = socket.local_addr()?.port();
     info!("UDP Socket bound locally to port: {}", local_port);
 
+    // 2. Resolve Public IP
     match net::resolve_public_ip(&socket, &config.stun_server).await {
         Ok(public_addr) => {
             info!("STUN Success! Your Public ID is: {}", public_addr);
@@ -75,17 +76,30 @@ async fn start_controller(
         }
     };
 
+    // 3. Command Loop (Wait for user to click "Connect" in UI)
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             Command::ConnectPeer => {
-                info!("command recieved to connect");
+                info!("Command received: ConnectPeer");
                 let peer_addr = {
                     let locked_state = shared_state.read().await;
                     locked_state.peer_ip
                 };
+
                 if let Some(peer_addr) = peer_addr {
-                    MessageManager::new(Arc::clone(&socket), peer_addr, config.timeout_secs)
-                        .await?;
+                    info!("Initiating handshake with: {}", peer_addr);
+
+                    // establish messaging connection between peer and client
+                    if let Err(e) =
+                        MessageManager::new(Arc::clone(&socket), peer_addr, config.timeout_secs)
+                            .await
+                    {
+                        error!("Connection failed: {:?}", e);
+                    } else {
+                        info!("Handshake complete. MessageManager ready.");
+                    }
+                } else {
+                    warn!("Connect command received but no peer IP set.");
                 }
             }
         }

@@ -18,11 +18,12 @@ pub struct AppState {
     /// The current connectivity status of the P2P node.
     pub status: Status,
 
-    /// IP address of peer client is connecting to
+    /// IP address of peer client is connecting to.
     ///
-    /// This is `None` until client clicks connect with valid address
+    /// This is `None` until client clicks connect with valid address.
     pub peer_ip: Option<SocketAddr>,
 
+    /// A MPSC channel to send message to controller.
     #[serde(skip)]
     pub cmd_tx: mpsc::Sender<Command>,
 }
@@ -50,7 +51,7 @@ impl AppState {
 }
 
 /// Represents the connection state of the P2P node.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum Status {
     /// The node is idle and not connected to any peer.
     Disconnected,
@@ -63,7 +64,9 @@ pub enum Status {
     _Connected,
 }
 
+/// Represents a command sent to controller
 #[derive(Debug)]
 pub enum Command {
+    /// Command sent from web server to controller to connect to a pper.
     ConnectPeer,
 }
