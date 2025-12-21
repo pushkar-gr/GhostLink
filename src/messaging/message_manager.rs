@@ -1,5 +1,7 @@
-use super::handshake;
-use crate::web::shared_state::AppState;
+use super::{
+    super::web::shared_state::{AppState, Status},
+    handshake,
+};
 use anyhow::Result;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{net::UdpSocket, sync::RwLock};
@@ -22,6 +24,9 @@ impl MessageManager {
             client_socket,
             peer_addr,
             timeout_secs,
+        };
+        {
+            state.write().await.status = Status::Punching;
         };
         handshake::handshake(
             Arc::clone(&message_manager.client_socket),

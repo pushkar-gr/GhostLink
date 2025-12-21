@@ -22,8 +22,6 @@ pub struct AppState {
     ///
     /// This is `None` until client clicks connect with valid address
     pub peer_ip: Option<SocketAddr>,
-    /// To store logs
-    pub logs: Vec<String>,
 }
 
 impl AppState {
@@ -38,7 +36,6 @@ impl AppState {
             public_ip,
             status,
             peer_ip,
-            logs: Vec::new(),
         }
     }
 }
@@ -51,7 +48,7 @@ pub enum Status {
 
     /// The node is actively attempting to initiate a connection (hole punching)
     /// with a peer.
-    _Punching,
+    Punching,
 
     /// A direct P2P connection has been successfully established.
     Connected,
