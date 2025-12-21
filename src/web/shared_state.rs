@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{RwLock, mpsc};
 
@@ -51,17 +51,17 @@ impl AppState {
 }
 
 /// Represents the connection state of the P2P node.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Status {
     /// The node is idle and not connected to any peer.
     Disconnected,
 
     /// The node is actively attempting to initiate a connection (hole punching)
     /// with a peer.
-    _Punching,
+    Punching,
 
     /// A direct P2P connection has been successfully established.
-    _Connected,
+    Connected,
 }
 
 /// Represents a command sent to controller

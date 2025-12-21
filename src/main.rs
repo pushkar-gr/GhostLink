@@ -90,9 +90,13 @@ async fn start_controller(
                     info!("Initiating handshake with: {}", peer_addr);
 
                     // establish messaging connection between peer and client
-                    if let Err(e) =
-                        MessageManager::new(Arc::clone(&socket), peer_addr, config.timeout_secs)
-                            .await
+                    if let Err(e) = MessageManager::new(
+                        Arc::clone(&socket),
+                        peer_addr,
+                        Arc::clone(shared_state),
+                        config.timeout_secs,
+                    )
+                    .await
                     {
                         error!("Connection failed: {:?}", e);
                     } else {

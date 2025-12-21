@@ -1,10 +1,21 @@
+use super::super::web::shared_state::{AppState, Status};
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     net::UdpSocket,
+    sync::RwLock,
     time::{Duration, Instant},
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
+
+/// Represents handshake message being sent or received.
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+enum HandshakeMsg {
+    Syn,
+    SynAck,
+    Bye,
+}
 
 /// Performs a UDP hole punching handshake with a remote peer.
 ///
@@ -24,6 +35,7 @@ use tracing::{info, warn};
 pub async fn handshake(
     client_socket: Arc<UdpSocket>,
     peer_addr: SocketAddr,
+    state: Arc<RwLock<AppState>>,
     timeout_secs: u64,
 ) -> Result<()> {
     let mut buf = [0u8; 2048];
@@ -46,26 +58,43 @@ pub async fn handshake(
             // 1. Listen to incoming packets.
             result = client_socket.recv_from(&mut buf) => {
                 let (len, sender) = result.context("Socket read error")?;
+
+                // Ignore packets from unknown senders
                 if sender == peer_addr {
-                    let msg = &buf[..len];
+                    match bincode::deserialize::<HandshakeMsg>(&buf[..len]) {
+                        Ok(msg) => match msg {
+                            HandshakeMsg::Syn => {
+                                // Peer is punching us -> Reply "SynAck"
+                                info!("Received SYN from {}. Sending SYN-ACK.", sender);
 
-                    if msg == b"BYE" {
-                        warn!("Peer {} rejected connection (received BYE)", sender);
-                        bail!("Connection rejected by peer");
+                                let reply = bincode::serialize(&HandshakeMsg::SynAck)?;
+                                client_socket.send_to(&reply, peer_addr).await?;
+                            }
+                            HandshakeMsg::SynAck => {
+                                info!("Received SYN-ACK from {}! Connection Established.", sender);
+
+                                state.write().await.status = Status::Connected;
+                                return Ok(());
+                            }
+                            HandshakeMsg::Bye => {
+                                warn!("Peer {} rejected connection (received BYE)", sender);
+                                bail!("Connection rejected by peer");
+                            }
+                        },
+                        Err(_) => {
+                            debug!("Received unparseable packet from {}", sender);
+                        }
                     }
-
-                    info!("Handshake success with peer {}. received {} bytes.", sender, len);
-                    return Ok(())
                 } else {
-                    info!("Ignored packet from unknown sender: {}", sender);
+                    debug!("Ignored packet from unknown sender: {}", sender);
                 }
             }
 
-            // 2. Periodically send "HOLLO_PUNCH" to keep NAT mapping open
+            // 2. Periodically send SYN to keep NAT mapping open
             _ = send_interval.tick() => {
-                let msg = b"HOLLO_PUNCH";
-                client_socket.send_to(msg, peer_addr).await.context("Failed to send packet")?;
-                info!("Punched hole to {}...", peer_addr);
+                let msg = bincode::serialize(&HandshakeMsg::Syn)?;
+                client_socket.send_to(&msg, peer_addr).await.context("Failed to send packet")?;
+                debug!("Punched hole to {}...", peer_addr);
             }
         }
     }
@@ -73,9 +102,28 @@ pub async fn handshake(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::web::shared_state::Command;
     use super::*;
+    use crate::web::shared_state::{AppState, Status};
     use std::{sync::Arc, time::Duration};
-    use tokio::net::UdpSocket;
+    use tokio::{
+        net::UdpSocket,
+        sync::{RwLock, mpsc},
+    };
+
+    /// Helper to create a dummy state for testing
+    fn create_dummy_state() -> Arc<RwLock<AppState>> {
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(32);
+        // listen to cmd_rx and do nothing
+        tokio::spawn(async move { while let Some(_cmd) = cmd_rx.recv().await {} });
+
+        Arc::new(RwLock::new(AppState::new(
+            None,
+            Status::Disconnected,
+            None,
+            cmd_tx,
+        )))
+    }
 
     /// Helper to create a socket bound to a random local port
     async fn bind_local() -> Arc<UdpSocket> {
@@ -84,49 +132,59 @@ mod tests {
     }
 
     /// Verifies that the handshake succeeds when the peer replies.
-    /// It simulates a peer (B) waiting 500ms and then sending "HELLO_BACK".
+    /// It simulates a peer (B) receiving SYN and then sending "SynAck".
     /// We expect `handshake` to return `Ok`.
     #[tokio::test]
     async fn test_handshake_success() {
         let socket_a = bind_local().await;
         let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
 
         let addr_a = socket_a.local_addr().unwrap();
         let addr_b = socket_b.local_addr().unwrap();
 
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            socket_b.send_to(b"HELLO_BACK", addr_a).await.unwrap();
+            let mut buf = [0u8; 1024];
+
+            //Wait for peer_1 to send SYN
+            let (len, _) = socket_b.recv_from(&mut buf).await.unwrap();
+            let msg: HandshakeMsg = bincode::deserialize(&buf[..len]).unwrap();
+            assert_eq!(msg, HandshakeMsg::Syn);
+
+            //Send SYN-ACK back
+            let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
+            socket_b.send_to(&reply, addr_a).await.unwrap();
         });
 
-        let result = handshake(socket_a, addr_b, 5).await;
+        let result = handshake(socket_a, addr_b, state_a.clone(), 5).await;
         assert!(result.is_ok());
+
+        let locked = state_a.read().await;
+        // Verify logs contain success message
+        assert_eq!(locked.status, Status::Connected);
     }
 
     /// Verifies that the function gives up if the peer is silent.
-    /// We start the handshake with a short 2-second timeout against a
-    /// dummy socket that never sends anything.
-    /// We expect `handshake` to return `Err("Handshake timed out...")`.
     #[tokio::test]
     async fn test_handshake_timeout() {
         let socket_a = bind_local().await;
         let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
         let addr_b = socket_b.local_addr().unwrap();
 
-        let result = handshake(socket_a, addr_b, 2).await;
+        let result = handshake(socket_a, addr_b, state_a, 2).await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("timed out"));
     }
 
     /// Verifies that we ignore packets from random people.
-    /// An "Attacker" (C) sends a packet first. The function should ignore it
-    /// and keep waiting until the "Real Peer" (B) replies later.
     #[tokio::test]
     async fn test_handshake_ignores_wrong_sender() {
         let socket_a = bind_local().await;
         let socket_b = bind_local().await; // Real Peer
         let socket_c = bind_local().await; // Attacker
+        let state_a = create_dummy_state();
 
         let addr_a = socket_a.local_addr().unwrap();
         let addr_b = socket_b.local_addr().unwrap();
@@ -136,32 +194,33 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(200)).await;
             socket_c.send_to(b"FAKE_PACKET", addr_a).await.unwrap();
 
-            // 2. Real peer replies later
+            // 2. Real peer replies later (simulated SynAck)
             tokio::time::sleep(Duration::from_millis(1000)).await;
-            socket_b.send_to(b"REAL_PACKET", addr_a).await.unwrap();
+            let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
+            socket_b.send_to(&reply, addr_a).await.unwrap();
         });
 
-        let result = handshake(socket_a, addr_b, 5).await;
+        let result = handshake(socket_a, addr_b, state_a, 5).await;
         assert!(result.is_ok());
     }
 
     /// Verifies that we respect a peer saying "BYE".
-    /// The peer sends "BYE" instead of a normal hello.
-    /// We expect `handshake` to fail immediately with "Connection rejected".
     #[tokio::test]
     async fn test_handshake_rejects_bye_packet() {
         let socket_a = bind_local().await;
         let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
 
         let addr_a = socket_a.local_addr().unwrap();
         let addr_b = socket_b.local_addr().unwrap();
 
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
-            socket_b.send_to(b"BYE", addr_a).await.unwrap();
+            let bye = bincode::serialize(&HandshakeMsg::Bye).unwrap();
+            socket_b.send_to(&bye, addr_a).await.unwrap();
         });
 
-        let result = handshake(socket_a, addr_b, 2).await;
+        let result = handshake(socket_a, addr_b, state_a, 2).await;
 
         assert!(result.is_err());
         assert_eq!(

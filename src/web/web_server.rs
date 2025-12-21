@@ -201,9 +201,8 @@ mod tests {
 
         // Simulate a state change
         {
-            let mut guard = state.write().await;
-            guard.status = Status::_Punching;
-        }
+            state.write().await.status = Status::Punching
+        };
 
         let app = router(state);
 
@@ -221,7 +220,7 @@ mod tests {
         let body_json: Value = serde_json::from_slice(&body_bytes).unwrap();
 
         // Matches the enum variant name serialization
-        assert_eq!(body_json, json!({ "status": "_Punching" }));
+        assert_eq!(body_json, json!({ "status": "Punching" }));
     }
 
     /// Sends a valid JSON packet (IP + Port) to `/api/connect` to confirm the server
@@ -285,7 +284,7 @@ mod tests {
         // 1. Simulate that we are already busy
         {
             let mut guard = state.write().await;
-            guard.status = Status::_Connected;
+            guard.status = Status::Connected;
         }
 
         let app = router(state);
