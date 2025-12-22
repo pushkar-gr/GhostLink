@@ -8,7 +8,7 @@
 </head>
 <body>
 
-    <div class="container">
+    <div class="container main-wrapper">
         <header class="header">
             <h1>GhostLink</h1>
             <div class="status-badge" id="statusBadge">
@@ -17,54 +17,120 @@
             </div>
         </header>
 
-        <div class="card">
-            <label class="label">Your Public Endpoint</label>
-            <div class="ip-display-group">
-                <span class="ip-text" id="myIpDisplay">Initializing...</span>
-                
-                <div class="action-buttons">
-                    <button class="icon-btn" id="refreshBtn" title="Refresh Public IP">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <polyline points="23 4 23 10 17 10"></polyline>
-                            <polyline points="1 20 1 14 7 14"></polyline>
-                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                        </svg>
-                    </button>
+        <!-- HOME / DISCONNECTED VIEW -->
+        <div id="view-home" class="view-section active">
+            <div class="card">
+                <label class="label">Your Public Endpoint</label>
+                <div class="ip-display-group">
+                    <span class="ip-text" id="myIpDisplay">Initializing...</span>
                     
-                    <button class="icon-btn" id="copyBtn" title="Copy to Clipboard">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                    </button>
+                    <div class="action-buttons">
+                        <button class="icon-btn" id="refreshBtn" title="Refresh Public IP">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                        </button>
+                        <button class="icon-btn" id="copyBtn" title="Copy to Clipboard">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        </button>
+                    </div>
                 </div>
+                <div id="apiErrorMsg" class="error-msg" style="margin-top: 0.5rem; text-align: center;"></div>
             </div>
-            <div id="apiErrorMsg" class="error-msg" style="margin-top: 0.5rem; text-align: center;"></div>
+
+            <div class="card">
+                <label class="label">Connect to Peer</label>
+                <form id="connectForm">
+                    <div class="input-row">
+                        <div style="flex: 2;">
+                            <input type="text" id="peerIp" placeholder="192.168.1.1" autocomplete="off">
+                            <div class="error-msg" id="ipError">Invalid IPv4 format</div>
+                        </div>
+                        <div style="flex: 1;">
+                            <input type="number" id="peerPort" placeholder="8080" min="1" max="65535">
+                            <div class="error-msg" id="portError">Invalid Port</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 1.5rem;">
+                        <button type="submit" class="btn-primary" disabled>Establish Link</button>
+                    </div>
+                </form>
+            </div>
         </div>
 
-        <div class="card">
-            <label class="label">Connect to Peer</label>
-            <form id="connectForm">
-                <div class="input-row">
-                    <div style="flex: 2;">
-                        <input type="text" id="peerIp" placeholder="192.168.1.1" autocomplete="off">
-                        <div class="error-msg" id="ipError">Invalid IPv4 format</div>
+        <!-- PUNCHING VIEW -->
+        <div id="view-punching" class="view-section">
+            <div class="card visualization-card">
+                <div class="network-viz">
+                    <div class="node">
+                        <div class="icon-circle client">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                        </div>
+                        <div class="node-label">You</div>
+                        <div class="node-ip" id="vizClientIp">...</div>
                     </div>
-                    <div style="flex: 1;">
-                        <input type="number" id="peerPort" placeholder="8080" min="1" max="65535">
-                        <div class="error-msg" id="portError">Invalid Port</div>
+
+                    <div class="connection-path">
+                        <div class="packet-stream">
+                            <div class="packet"></div>
+                            <div class="packet"></div>
+                            <div class="packet"></div>
+                        </div>
+                        <div class="path-line"></div>
+                        <!-- New Timeout Display -->
+                        <div class="timeout-badge" id="punchTimeout">--s</div>
+                    </div>
+
+                    <div class="node">
+                        <div class="icon-circle peer">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                        </div>
+                        <div class="node-label">Peer</div>
+                        <div class="node-ip" id="vizPeerIp">Target</div>
                     </div>
                 </div>
-                <div style="margin-top: 1.5rem;">
-                    <button type="submit" class="btn-primary" disabled>Establish Link</button>
+            </div>
+
+            <div class="card terminal-card">
+                <div class="terminal-header">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                    <span class="title">Handshake Logs</span>
                 </div>
-            </form>
+                <div class="terminal-body" id="punchLogs">
+                    <div class="log-line system">> Initializing Hole Punching Sequence...</div>
+                </div>
+            </div>
         </div>
+
+        <!-- CONNECTED VIEW -->
+        <div id="view-connected" class="view-section">
+            <div class="card success-card">
+                <div class="success-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                </div>
+                <h2>Connection Established</h2>
+                <p>Direct P2P tunnel is active.</p>
+                
+                <div class="connection-details">
+                    <div class="detail-row">
+                        <span>Local Endpoint:</span>
+                        <span class="mono" id="connLocalIp">...</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>Remote Peer:</span>
+                        <span class="mono" id="connRemoteIp">...</span>
+                    </div>
+                </div>
+
+                <button id="disconnectBtn" class="btn-primary" style="background-color: var(--card-bg); border: 1px solid rgba(255,255,255,0.1); margin-top: 1.5rem;">Disconnect</button>
+            </div>
+        </div>
+
     </div>
 
     <div class="toast" id="toast">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        Copied to clipboard
+        <span class="toast-msg">Notification</span>
     </div>
 
     <script src="script.js"></script>
