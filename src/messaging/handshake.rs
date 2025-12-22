@@ -1,4 +1,4 @@
-use super::super::web::shared_state::{AppState, Status};
+use super::super::web::shared_state::{AppEvent, AppState, Status};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
@@ -43,6 +43,8 @@ pub async fn handshake(
     let start_time = Instant::now();
     let mut send_interval = tokio::time::interval(Duration::from_millis(500));
 
+    let event_tx = { state.read().await.event_tx.clone() };
+
     info!("Starting handshake with {}", peer_addr);
 
     // Prevent a burst of ticks when the task is delayed.
@@ -51,8 +53,18 @@ pub async fn handshake(
     loop {
         // Check timeout at every iteration.
         if start_time.elapsed() > timeout {
+            let _ = event_tx.send(AppEvent::Punching {
+                timeout: Some(0),
+                message: Some(format!(
+                    "{}: Handshake timed out with {}",
+                    chrono::Local::now(),
+                    peer_addr
+                )),
+            });
             bail!("Handshake timed out with {}", peer_addr);
         }
+
+        let secs_left = timeout.as_secs() - start_time.elapsed().as_secs();
 
         tokio::select! {
             // 1. Listen to incoming packets.
@@ -67,16 +79,30 @@ pub async fn handshake(
                                 // Peer is punching us -> Reply "SynAck"
                                 info!("Received SYN from {}. Sending SYN-ACK.", sender);
 
+                                let _ = event_tx.send(AppEvent::Punching {
+                                    timeout: Some(secs_left),
+                                    message: Some(format!("Received SYN from {}. Sending SYN-ACK.", sender)),
+                                });
+
                                 let reply = bincode::serialize(&HandshakeMsg::SynAck)?;
                                 client_socket.send_to(&reply, peer_addr).await?;
                             }
                             HandshakeMsg::SynAck => {
                                 info!("Received SYN-ACK from {}! Connection Established.", sender);
 
+                                let _ = event_tx.send(AppEvent::Punching {
+                                    timeout: Some(secs_left),
+                                    message: Some(format!("Received SYN-ACK from {}! Connection Established.", sender)),
+                                });
+
                                 state.write().await.status = Status::Connected;
                                 return Ok(());
                             }
                             HandshakeMsg::Bye => {
+                                let _ = event_tx.send(AppEvent::Punching {
+                                    timeout: Some(secs_left),
+                                    message: Some("Connection rejected by peer".to_string()),
+                                });
                                 warn!("Peer {} rejected connection (received BYE)", sender);
                                 bail!("Connection rejected by peer");
                             }
@@ -94,7 +120,12 @@ pub async fn handshake(
             _ = send_interval.tick() => {
                 let msg = bincode::serialize(&HandshakeMsg::Syn)?;
                 client_socket.send_to(&msg, peer_addr).await.context("Failed to send packet")?;
+
                 debug!("Punched hole to {}...", peer_addr);
+                let _ = event_tx.send(AppEvent::Punching {
+                    timeout: Some(secs_left),
+                    message: Some(format!("Punched hole to {}...", peer_addr)),
+                });
             }
         }
     }
@@ -102,18 +133,18 @@ pub async fn handshake(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::web::shared_state::Command;
+    use super::super::super::web::shared_state::{AppState, Command, Status};
     use super::*;
-    use crate::web::shared_state::{AppState, Status};
     use std::{sync::Arc, time::Duration};
     use tokio::{
         net::UdpSocket,
-        sync::{RwLock, mpsc},
+        sync::{RwLock, broadcast, mpsc},
     };
 
     /// Helper to create a dummy state for testing
     fn create_dummy_state() -> Arc<RwLock<AppState>> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(32);
+        let (event_tx, _) = broadcast::channel::<AppEvent>(32);
         // listen to cmd_rx and do nothing
         tokio::spawn(async move { while let Some(_cmd) = cmd_rx.recv().await {} });
 
@@ -122,6 +153,7 @@ mod tests {
             Status::Disconnected,
             None,
             cmd_tx,
+            event_tx,
         )))
     }
 

@@ -7,7 +7,7 @@ use crate::{
     config::Config,
     messaging::message_manager::MessageManager,
     web::{
-        shared_state::{AppState, Command, SharedState, Status},
+        shared_state::{AppEvent, AppState, Command, SharedState, Status},
         web_server,
     },
 };
@@ -15,7 +15,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::{
     net::UdpSocket,
-    sync::{RwLock, mpsc},
+    sync::{RwLock, broadcast, mpsc},
 };
 use tracing::{error, info, warn};
 
@@ -28,12 +28,14 @@ async fn main() -> anyhow::Result<()> {
     info!("Config loaded...");
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(32);
+    let (event_tx, _) = broadcast::channel::<AppEvent>(32);
 
     let shared_state = Arc::new(RwLock::new(AppState::new(
         None,
         Status::Disconnected,
         None,
         cmd_tx,
+        event_tx,
     )));
 
     let state_clone = Arc::clone(&shared_state);

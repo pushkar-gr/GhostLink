@@ -10,14 +10,19 @@ use axum::{
     Json, Router,
     extract::State,
     http::StatusCode,
+    response::sse::{Event, KeepAlive, Sse},
     routing::{get, post},
 };
+use futures::stream::Stream;
 use serde::Deserialize;
 use serde_json::json;
 use std::{
+    convert::Infallible,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
+    time::Duration,
 };
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::debug;
 
@@ -55,6 +60,7 @@ pub fn router(shared_state: SharedState) -> Router {
         .route("/api/status", get(get_status))
         .route("/api/peer", get(get_peer))
         .route("/api/connect", post(post_peer_ip))
+        .route("/api/events", get(handle_sse))
         // Serve the "static" directory for all non-API requests
         .fallback_service(ServeDir::new("static").append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
@@ -149,9 +155,32 @@ async fn post_peer_ip(
     Ok(())
 }
 
+async fn handle_sse(
+    State(state): State<SharedState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    debug!("SEE request received");
+
+    let rx = state.read().await.event_tx.subscribe();
+    let stream = BroadcastStream::new(rx);
+
+    let stream = stream.map(|msg| match msg {
+        Ok(app_event) => {
+            let json = serde_json::to_string(&app_event).unwrap_or_default();
+            Ok(Event::default().data(json))
+        }
+        Err(_) => Ok(Event::default().comment("missed message")),
+    });
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(1))
+            .text("keep-alive"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::shared_state::{AppState, Status};
+    use super::super::shared_state::{AppEvent, AppState, Status};
     use super::*;
     use axum::{
         body::Body,
@@ -159,12 +188,13 @@ mod tests {
     };
     use serde_json::{Value, json};
     use std::sync::Arc;
-    use tokio::sync::{RwLock, mpsc};
+    use tokio::sync::{RwLock, broadcast, mpsc};
     use tower::ServiceExt;
 
     /// Helper to create a fresh state for each test
     fn create_test_state() -> SharedState {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(32);
+        let (event_tx, _) = broadcast::channel::<AppEvent>(32);
         // listen to cmd_rx and do nothing
         tokio::spawn(async move { while let Some(_cmd) = cmd_rx.recv().await {} });
 
@@ -173,6 +203,7 @@ mod tests {
             Status::Disconnected,
             None,
             cmd_tx,
+            event_tx,
         )))
     }
 
