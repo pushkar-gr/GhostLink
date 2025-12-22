@@ -55,11 +55,7 @@ pub async fn handshake(
         if start_time.elapsed() > timeout {
             let _ = event_tx.send(AppEvent::Punching {
                 timeout: Some(0),
-                message: Some(format!(
-                    "{}: Handshake timed out with {}",
-                    chrono::Local::now(),
-                    peer_addr
-                )),
+                message: Some(format!("Handshake timed out with {}", peer_addr)),
             });
             bail!("Handshake timed out with {}", peer_addr);
         }
