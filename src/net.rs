@@ -133,4 +133,87 @@ mod test {
         let ip = result.unwrap();
         assert_eq!(ip.port(), 9999);
     }
+
+    /// Verifies that resolve_public_ip fails when DNS resolution fails.
+    #[tokio::test]
+    async fn test_resolve_public_ip_dns_failure() {
+        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+
+        // Use an invalid hostname that will fail DNS resolution
+        let result = resolve_public_ip(&socket, "invalid.hostname.that.does.not.exist:19302").await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Failed to resolve DNS") || err_msg.contains("failed to lookup"));
+    }
+
+    /// Verifies that resolve_public_ip rejects responses with mismatched transaction IDs.
+    #[tokio::test]
+    async fn test_resolve_public_ip_transaction_id_mismatch() {
+        let mock_server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = mock_server.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (len, client_addr) = mock_server.recv_from(&mut buf).await.unwrap();
+
+            // Parse the request to get its transaction ID
+            let mut req = Message::new();
+            req.unmarshal_binary(&buf[..len]).unwrap();
+
+            // Create a response with a DIFFERENT transaction ID
+            let mut resp = Message::new();
+            // Manually create a different transaction ID by manipulating bytes
+            let mut new_tx_id = req.transaction_id;
+            new_tx_id.0[0] = new_tx_id.0[0].wrapping_add(1); // Change first byte
+            resp.transaction_id = new_tx_id;
+
+            resp.build(&[
+                Box::new(BINDING_SUCCESS),
+                Box::new(XorMappedAddress {
+                    ip: "127.0.0.1".parse().unwrap(),
+                    port: 9999,
+                }),
+            ])
+            .unwrap();
+
+            mock_server.send_to(&resp.raw, client_addr).await.unwrap();
+        });
+
+        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let result = resolve_public_ip(&socket, &server_addr.to_string()).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Security Mismatch") || err_msg.contains("Transaction ID"));
+    }
+
+    /// Verifies that resolve_public_ip fails when response lacks XOR-MAPPED-ADDRESS.
+    #[tokio::test]
+    async fn test_resolve_public_ip_missing_xor_address() {
+        let mock_server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = mock_server.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            let (len, client_addr) = mock_server.recv_from(&mut buf).await.unwrap();
+
+            let mut req = Message::new();
+            req.unmarshal_binary(&buf[..len]).unwrap();
+
+            // Send response WITHOUT XorMappedAddress attribute
+            let mut resp = Message::new();
+            resp.transaction_id = req.transaction_id;
+            resp.build(&[Box::new(BINDING_SUCCESS)]).unwrap();
+
+            mock_server.send_to(&resp.raw, client_addr).await.unwrap();
+        });
+
+        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let result = resolve_public_ip(&socket, &server_addr.to_string()).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("XOR-MAPPED-ADDRESS") || err_msg.contains("did not contain"));
+    }
 }

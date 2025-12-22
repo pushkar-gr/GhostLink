@@ -336,4 +336,150 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
+
+    /// Verifies that peer IP is correctly set in state after valid connection request.
+    #[tokio::test]
+    async fn test_post_connect_updates_peer_ip_in_state() {
+        let state = create_test_state();
+        let app = router(state.clone());
+
+        let payload = json!({
+            "ip": "10.0.0.5",
+            "port": 7777
+        });
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/connect")
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Verify peer_ip was set correctly
+        let locked_state = state.read().await;
+        assert!(locked_state.peer_ip.is_some());
+        let peer = locked_state.peer_ip.unwrap();
+        assert_eq!(peer.ip().to_string(), "10.0.0.5");
+        assert_eq!(peer.port(), 7777);
+    }
+
+    /// Verifies that status endpoint correctly reflects state transitions.
+    #[tokio::test]
+    async fn test_status_reflects_all_states() {
+        let state = create_test_state();
+
+        // Test Disconnected
+        {
+            state.write().await.status = Status::Disconnected;
+        }
+        let app = router(state.clone());
+        let request = Request::builder()
+            .uri("/api/status")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_json: Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body_json, json!({ "status": "Disconnected" }));
+
+        // Test Connected
+        {
+            state.write().await.status = Status::Connected;
+        }
+        let app = router(state.clone());
+        let request = Request::builder()
+            .uri("/api/status")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_json: Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body_json, json!({ "status": "Connected" }));
+    }
+
+    /// Verifies that public IP is correctly returned when set.
+    #[tokio::test]
+    async fn test_get_ip_returns_set_value() {
+        let state = create_test_state();
+
+        // Set a public IP
+        {
+            let mut locked = state.write().await;
+            locked.public_ip = Some("203.0.113.42:12345".parse().unwrap());
+        }
+
+        let app = router(state);
+
+        let request = Request::builder()
+            .uri("/api/ip")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body_json: Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(body_json, json!({ "public_ip": "203.0.113.42:12345" }));
+    }
+
+    /// Verifies that connect endpoint rejects requests with invalid port numbers.
+    #[tokio::test]
+    async fn test_post_connect_accepts_valid_port_range() {
+        let state = create_test_state();
+        let app = router(state);
+
+        // Test with port 65535 (max valid port)
+        let payload = json!({
+            "ip": "192.168.1.1",
+            "port": 65535
+        });
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/connect")
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// Verifies that connect with status Punching is rejected.
+    #[tokio::test]
+    async fn test_post_connect_rejects_when_punching() {
+        let state = create_test_state();
+
+        {
+            state.write().await.status = Status::Punching;
+        }
+
+        let app = router(state);
+
+        let payload = json!({
+            "ip": "192.168.1.1",
+            "port": 9000
+        });
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/connect")
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }

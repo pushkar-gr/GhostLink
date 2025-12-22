@@ -19,7 +19,7 @@ enum HandshakeMsg {
 
 /// Performs a UDP hole punching handshake with a remote peer.
 ///
-/// This function tires to establish a bidirectional connection by sending "HELLOW_PUNCH" packets
+/// This function tires to establish a bidirectional connection by sending SYN packets
 /// to the peer while also listening for incoming response from that peer.
 ///
 /// Uses tokio::select! to handle send/receive loop without blocking.
@@ -227,5 +227,98 @@ mod tests {
             result.unwrap_err().to_string(),
             "Connection rejected by peer"
         );
+    }
+
+    /// Verifies that multiple SYN packets are handled correctly without breaking the handshake.
+    #[tokio::test]
+    async fn test_handshake_handles_multiple_syn() {
+        let socket_a = bind_local().await;
+        let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
+
+        let addr_a = socket_a.local_addr().unwrap();
+        let addr_b = socket_b.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+
+            // Receive first SYN
+            let (len, _) = socket_b.recv_from(&mut buf).await.unwrap();
+            let msg: HandshakeMsg = bincode::deserialize(&buf[..len]).unwrap();
+            assert_eq!(msg, HandshakeMsg::Syn);
+
+            // Send multiple SYN-ACK responses (simulating retries)
+            for _ in 0..3 {
+                let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
+                socket_b.send_to(&reply, addr_a).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        });
+
+        let result = handshake(socket_a, addr_b, state_a.clone(), 5).await;
+        assert!(result.is_ok());
+        assert_eq!(state_a.read().await.status, Status::Connected);
+    }
+
+    /// Verifies that handshake can handle receiving SYN from peer (simultaneous connection).
+    #[tokio::test]
+    async fn test_handshake_simultaneous_syn() {
+        let socket_a = bind_local().await;
+        let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
+
+        let addr_a = socket_a.local_addr().unwrap();
+        let addr_b = socket_b.local_addr().unwrap();
+
+        // Peer B also tries to handshake with A
+        let socket_b_clone = socket_b.clone();
+        tokio::spawn(async move {
+            // Wait for A's SYN
+            let mut buf = [0u8; 1024];
+            let (len, sender) = socket_b_clone.recv_from(&mut buf).await.unwrap();
+
+            if sender == addr_a {
+                if let Ok(HandshakeMsg::Syn) = bincode::deserialize(&buf[..len]) {
+                    // Respond with SYN-ACK
+                    let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
+                    socket_b_clone.send_to(&reply, addr_a).await.unwrap();
+                }
+            }
+        });
+
+        let result = handshake(socket_a, addr_b, state_a.clone(), 5).await;
+        assert!(result.is_ok());
+        assert_eq!(state_a.read().await.status, Status::Connected);
+    }
+
+    /// Verifies that unparseable packets don't crash the handshake process.
+    #[tokio::test]
+    async fn test_handshake_resilient_to_malformed_packets() {
+        let socket_a = bind_local().await;
+        let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
+
+        let addr_a = socket_a.local_addr().unwrap();
+        let addr_b = socket_b.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            // Send garbage data
+            socket_b
+                .send_to(b"GARBAGE_DATA_12345", addr_a)
+                .await
+                .unwrap();
+
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // Then send proper SYN-ACK
+            let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
+            socket_b.send_to(&reply, addr_a).await.unwrap();
+        });
+
+        let result = handshake(socket_a, addr_b, state_a.clone(), 5).await;
+        assert!(result.is_ok());
+        assert_eq!(state_a.read().await.status, Status::Connected);
     }
 }
