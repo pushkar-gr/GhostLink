@@ -2,6 +2,7 @@
 const state = {
     fullAddress: null,
     peerAddress: null,
+    natType: 'Unknown',
     connectionStatus: 'disconnected', // disconnected, punching, connected
     isIpValid: false,
     isPortValid: false,
@@ -23,6 +24,7 @@ const els = {
 
     // Home
     myIpDisplay: document.getElementById('myIpDisplay'),
+    natTypeDisplay: document.getElementById('natTypeDisplay'), // New NAT Element
     apiErrorMsg: document.getElementById('apiErrorMsg'),
     copyBtn: document.getElementById('copyBtn'),
     refreshBtn: document.getElementById('refreshBtn'),
@@ -52,10 +54,9 @@ const els = {
 // --- Initialization ---
 async function init() {
     toggleSubmitButton();
-    await fetchPublicInfo();
     
-    // Initial status check to set UI state immediately (prevents flicker)
-    await fetchInitialStatus();
+    // Initial fetch of the complete application state
+    await fetchState();
     
     // Connect to SSE for real-time updates
     connectSSE();
@@ -63,64 +64,97 @@ async function init() {
     setupEventListeners();
 }
 
-// --- Status & State Logic ---
+// --- State Logic ---
 
-async function fetchInitialStatus() {
+/**
+ * Fetches the complete state from the backend via the new /api/state endpoint.
+ * Replaces old /api/ip, /api/status, and /api/peer calls.
+ */
+async function fetchState() {
+    if (els.refreshBtn) {
+        els.refreshBtn.classList.add('spin');
+        els.refreshBtn.disabled = true;
+    }
+    els.myIpDisplay.style.opacity = '0.5';
+
     try {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-        // The /api/status endpoint returns AppState
-        // { public_ip: "...", status: "...", peer_ip: "..." }
-        if(data && data.status) {
-            handleStatusChange(data.status, data);
+        const res = await fetch('/api/state');
+        if (!res.ok) throw new Error(`Server error`);
+        
+        const jsonResponse = await res.json();
+        
+        // The server returns: { "state": { public_ip: "...", ... } }
+        // We must unwrap the "state" key.
+        const appState = jsonResponse.state;
+        
+        if (appState) {
+            syncState(appState);
+            renderMyInfo(true);
+        } else {
+            console.warn("Invalid state structure received", jsonResponse);
+            renderMyInfo(false);
         }
-    } catch (e) {
-        console.warn("Initial status fetch failed", e);
+
+    } catch (err) {
+        console.warn("State fetch failed", err);
+        renderMyInfo(false);
+    } finally {
+        setTimeout(() => {
+            if (els.refreshBtn) {
+                els.refreshBtn.classList.remove('spin');
+                els.refreshBtn.disabled = false;
+            }
+            els.myIpDisplay.style.opacity = '1';
+        }, 500);
     }
 }
 
-async function fetchPeerInfo() {
-    // Fallback: If we don't have peer info from events, try to fetch it explicitly
-    try {
-        const res = await fetch('/api/peer');
-        if(res.ok) {
-            const data = await res.json();
-            // Expecting { ip: "1.2.3.4", port: 1234 } or string
-            if (data.ip && data.port) {
-                state.peerAddress = `${data.ip}:${data.port}`;
-            } else if (typeof data === 'string') {
-                state.peerAddress = data;
-            }
-        }
-    } catch(e) {
-        console.log("No peer info available via API");
+/**
+ * Centralizes logic for updating the frontend state from a backend AppState object.
+ * Can be called from the REST API fetch or from an SSE Disconnected event.
+ */
+function syncState(data) {
+    if (!data) return;
+
+    // 1. Public IP
+    if (data.public_ip) state.fullAddress = data.public_ip;
+    
+    // 2. Peer IP
+    if (data.peer_ip) state.peerAddress = data.peer_ip;
+    else if (data.peer_ip === null) state.peerAddress = null; // Explicit reset
+
+    // 3. NAT Type (New)
+    if (data.nat_type) {
+        state.natType = data.nat_type;
+        renderNatType();
+    }
+
+    // 4. Status
+    if (data.status) {
+        // reuse handleStatusChange to trigger UI transitions if needed,
+        // but strictly speaking, fetchState is usually for init/refresh.
+        // We pass the whole data object so handleStatusChange can see the fields.
+        handleStatusChange(data.status, data);
     }
 }
 
 function handleStatusChange(statusStr, data = {}) {
-    // Backend enum variants might be "Disconnected", "Punching", etc.
-    // SSE event tag renames them to "DISCONNECTED", "PUNCHING", etc.
-    // We normalize to upper case for comparison.
     const normStatus = (statusStr || 'DISCONNECTED').toUpperCase();
     
-    // Handle Data Syncing based on Event Structure
-    // 1. If it's a DISCONNECTED event (AppEvent::Disconnected { state }), it has a nested `state` object.
+    // Handle Data Syncing based on Event Structure vs API Structure
+    
+    // CASE A: Disconnected Event via SSE (AppEvent::Disconnected { state })
     if (normStatus === 'DISCONNECTED' && data.state) {
-        if (data.state.public_ip) state.fullAddress = data.state.public_ip;
-        if (data.state.peer_ip) state.peerAddress = data.state.peer_ip;
-        // We could also sync nat_type here if needed
+        syncState(data.state);
     }
-    // 2. If it's a standard AppState (from /api/status), fields are top-level.
-    else {
-        if (data.public_ip) state.fullAddress = data.public_ip;
-        if (data.peer_ip) state.peerAddress = data.peer_ip;
-    }
-
+    // CASE B: Standard AppState via REST API (/api/state) or top-level event fields
+    // (Note: syncState calls handleStatusChange, so we avoid infinite recursion by not calling syncState back)
+    
     // Logic: Transitioning FROM Punching TO Disconnected
     if (state.connectionStatus === 'punching' && normStatus === 'DISCONNECTED') {
         if (state.lastSavedMessage) {
             showToast(state.lastSavedMessage);
-            state.lastSavedMessage = null; // Clear after showing
+            state.lastSavedMessage = null;
         }
     }
 
@@ -129,7 +163,7 @@ function handleStatusChange(statusStr, data = {}) {
     // 1. Update Badge
     renderStatusBadge();
 
-    // 2. Switch Views & Logic
+    // 2. Switch Views
     els.viewHome.classList.remove('active');
     els.viewPunching.classList.remove('active');
     els.viewConnected.classList.remove('active');
@@ -141,21 +175,15 @@ function handleStatusChange(statusStr, data = {}) {
     } else {
         // DISCONNECTED
         els.viewHome.classList.add('active');
-        // We generally keep peerAddress in state until a new connection clears it,
-        // or if the backend explicitly sends null in the state.
-        if (data.state && data.state.peer_ip === null) {
-            state.peerAddress = null;
-        }
     }
 }
 
 async function enterPunchingState(data) {
     els.viewPunching.classList.add('active');
     
-    // If peer info is missing, try to fetch it
-    if (!state.peerAddress) {
-        await fetchPeerInfo();
-    }
+    // If peer info is missing locally, we rely on fetchState or what we have.
+    // Since /api/peer is gone, we don't fetch it explicitly anymore.
+    // It should have been synced via fetchState() or previous input.
     
     els.vizClientIp.innerText = state.fullAddress || "Unknown";
     els.vizPeerIp.innerText = state.peerAddress || "Target";
@@ -164,7 +192,6 @@ async function enterPunchingState(data) {
     if (data.timeout !== undefined && data.timeout !== null) {
         els.punchTimeout.innerText = `${data.timeout}s`;
         
-        // "when the time left is 0, save the message"
         if (data.timeout === 0 && data.message) {
             state.lastSavedMessage = data.message;
         }
@@ -178,17 +205,11 @@ async function enterPunchingState(data) {
 
 async function enterConnectedState(data) {
     els.viewConnected.classList.add('active');
-    
-    if (!state.peerAddress) {
-        await fetchPeerInfo();
-    }
 
     els.connLocalIp.innerText = state.fullAddress;
     els.connRemoteIp.innerText = state.peerAddress || "Connected Peer";
 
-    // AppEvent::Connected { message }
     if (data.message) {
-        // Optionally log or toast the success message
         console.log("Connected:", data.message);
     }
 }
@@ -206,7 +227,7 @@ function connectSSE() {
         try {
             const data = JSON.parse(event.data);
             
-            // Structure: 
+            // AppEvent Structure: 
             // { status: "DISCONNECTED", state: { ... } }
             // { status: "PUNCHING", timeout: 10, message: "..." }
             // { status: "CONNECTED", message: "..." }
@@ -221,11 +242,28 @@ function connectSSE() {
 
     state.sseSource.onerror = (err) => {
         console.warn("SSE Connection issue", err);
-        // Browser will auto-retry
     };
 }
 
-// --- UI Helpers ---
+// --- UI Rendering ---
+
+function renderNatType() {
+    if (!els.natTypeDisplay) return;
+    
+    const type = state.natType;
+    els.natTypeDisplay.innerText = type;
+    
+    // Remove old classes
+    els.natTypeDisplay.classList.remove('cone', 'symmetric');
+    
+    // Add specific color class
+    if (type.toLowerCase().includes('cone')) {
+        els.natTypeDisplay.classList.add('cone');
+    } else if (type.toLowerCase().includes('symmetric')) {
+        els.natTypeDisplay.classList.add('symmetric');
+    }
+}
+
 function renderStatusBadge() {
     const s = state.connectionStatus;
     els.statusText.innerText = s.charAt(0).toUpperCase() + s.slice(1);
@@ -246,45 +284,6 @@ function renderStatusBadge() {
     els.statusBadge.style.borderColor = border;
 }
 
-function addLog(message) {
-    const row = document.createElement('div');
-    row.className = `log-line system`; 
-    // Basic timestamp
-    const timeStr = new Date().toLocaleTimeString('en-US', {hour12: false, hour:"2-digit", minute:"2-digit", second:"2-digit"});
-    
-    row.innerHTML = `<span class="log-timestamp">[${timeStr}]</span> ${message}`;
-    els.punchLogs.appendChild(row);
-    els.punchLogs.scrollTop = els.punchLogs.scrollHeight;
-}
-
-// --- API Calls ---
-async function fetchPublicInfo() {
-    els.refreshBtn.classList.add('spin');
-    els.refreshBtn.disabled = true;
-    els.myIpDisplay.style.opacity = '0.5';
-
-    try {
-        const res = await fetch('/api/ip');
-        if (!res.ok) throw new Error(`Server error`);
-        const data = await res.json();
-        // Assuming { public_ip: "..." }
-        if (data.public_ip) {
-            state.fullAddress = data.public_ip;
-            renderMyInfo(true);
-        } else {
-            renderMyInfo(false);
-        }
-    } catch (err) {
-        renderMyInfo(false);
-    } finally {
-        setTimeout(() => {
-            els.refreshBtn.classList.remove('spin');
-            els.refreshBtn.disabled = false;
-            els.myIpDisplay.style.opacity = '1';
-        }, 500);
-    }
-}
-
 function renderMyInfo(success) {
     if (success && state.fullAddress) {
         els.myIpDisplay.innerText = state.fullAddress;
@@ -300,13 +299,23 @@ function renderMyInfo(success) {
     }
 }
 
+function addLog(message) {
+    const row = document.createElement('div');
+    row.className = `log-line system`; 
+    const timeStr = new Date().toLocaleTimeString('en-US', {hour12: false, hour:"2-digit", minute:"2-digit", second:"2-digit"});
+    row.innerHTML = `<span class="log-timestamp">[${timeStr}]</span> ${message}`;
+    els.punchLogs.appendChild(row);
+    els.punchLogs.scrollTop = els.punchLogs.scrollHeight;
+}
+
+// --- Interactions ---
+
 async function handleConnect(e) {
     e.preventDefault();
     if (!state.isIpValid || !state.isPortValid) return;
 
     const ip = els.peerIpInput.value.trim();
     const port = parseInt(els.peerPortInput.value.trim(), 10);
-    // Optimistically set peer address locally
     state.peerAddress = `${ip}:${port}`;
 
     const btn = els.submitBtn;
@@ -321,7 +330,6 @@ async function handleConnect(e) {
         });
         if (!res.ok) throw new Error();
         
-        // Logic handled by SSE events now
         els.punchLogs.innerHTML = '';
         state.lastSavedMessage = null;
 
@@ -336,6 +344,7 @@ async function handleConnect(e) {
 async function handleDisconnect() {
     try {
         await fetch('/api/disconnect', { method: 'POST' });
+        // UI updates via SSE Disconnected event
     } catch(e) {
         console.error(e);
     }
@@ -354,7 +363,6 @@ function showToast(message) {
 
 function copyToClipboard() {
     if (state.fullAddress) {
-        // Use legacy execCommand as requested/safer for iframes
         const textarea = document.createElement('textarea');
         textarea.value = state.fullAddress;
         document.body.appendChild(textarea);
@@ -363,7 +371,7 @@ function copyToClipboard() {
             document.execCommand('copy');
             showToast("Copied to clipboard");
         } catch (err) {
-            console.error('Fallback copy failed', err);
+            console.error('Copy failed', err);
         }
         document.body.removeChild(textarea);
     }
@@ -418,7 +426,8 @@ function handlePortValidation() {
 
 function setupEventListeners() {
     if(els.copyBtn) els.copyBtn.addEventListener('click', copyToClipboard);
-    if(els.refreshBtn) els.refreshBtn.addEventListener('click', fetchPublicInfo);
+    // Updated listener: "Refresh" now calls the unified fetchState
+    if(els.refreshBtn) els.refreshBtn.addEventListener('click', fetchState);
     els.connectForm.addEventListener('submit', handleConnect);
     els.disconnectBtn.addEventListener('click', handleDisconnect);
     els.peerIpInput.addEventListener('input', () => handleIpValidation('input'));

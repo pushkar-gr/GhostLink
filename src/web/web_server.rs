@@ -52,9 +52,7 @@ pub async fn serve(shared_state: SharedState, port: u16) -> Result<()> {
 pub fn router(shared_state: SharedState) -> Router {
     Router::new()
         // API Routes
-        .route("/api/ip", get(get_ip))
-        .route("/api/status", get(get_status))
-        .route("/api/peer", get(get_peer))
+        .route("/api/state", get(get_ip))
         .route("/api/connect", post(connect_peer))
         .route("/api/events", get(sse_handler))
         // Static File Serving (Fallback)
@@ -70,21 +68,7 @@ pub fn router(shared_state: SharedState) -> Router {
 /// Returns the public IP and port of the local node (if resolved).
 async fn get_ip(State(state): State<SharedState>) -> impl IntoResponse {
     let data = state.read().await;
-    Json(json!({ "public_ip": data.public_ip }))
-}
-
-/// Handler for `GET /api/peer`.
-/// Returns the IP and port of the connected/target peer.
-async fn get_peer(State(state): State<SharedState>) -> impl IntoResponse {
-    let data = state.read().await;
-    Json(json!({ "peer_ip": data.peer_ip }))
-}
-
-/// Handler for `GET /api/status`.
-/// Returns the current connection state (Disconnected, Punching, Connected).
-async fn get_status(State(state): State<SharedState>) -> impl IntoResponse {
-    let data = state.read().await;
-    Json(json!({ "status": data.status }))
+    Json(json!({ "state": data.clone() }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,7 +155,7 @@ async fn sse_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::super::shared_state::{AppEvent, AppState, Status};
+    use super::super::shared_state::{AppEvent, AppState, NatType, Status};
     use super::*;
     use axum::{
         body::Body,
@@ -194,49 +178,72 @@ mod tests {
         Arc::new(RwLock::new(AppState::new(cmd_tx, event_tx)))
     }
 
+    /// Checks that `/api/state` returns the correct default JSON structure
+    /// when the application first boots (all nulls/defaults).
     #[tokio::test]
-    async fn test_get_ip_initial_is_null() {
+    async fn test_get_state_initial_structure() {
         let state = create_test_state();
         let app = router(state);
 
         let request = Request::builder()
-            .uri("/api/ip")
+            .uri("/api/state")
             .body(Body::empty())
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let body_json: Value = serde_json::from_slice(&body).unwrap();
+        let body_json: Value = serde_json::from_slice(&body_bytes).unwrap();
 
-        assert_eq!(body_json, json!({ "public_ip": null }));
+        // The API returns { "state": { ... } }
+        let state_obj = &body_json["state"];
+
+        // Verify defaults
+        assert_eq!(state_obj["public_ip"], Value::Null);
+        assert_eq!(state_obj["peer_ip"], Value::Null);
+        assert_eq!(state_obj["status"], "Disconnected");
+        assert_eq!(state_obj["nat_type"], "Unknown");
     }
 
+    /// Manually modifies the `SharedState` and verifies that `/api/state`
+    /// reflects these changes (IPs, Status, NAT Type) in the JSON response.
     #[tokio::test]
-    async fn test_get_status_returns_current_state() {
+    async fn test_get_state_reflects_updates() {
         let state = create_test_state();
 
-        // Mutate state directly for testing
+        // 1. Manually update internal state
         {
-            state.write().await.status = Status::Punching;
+            let mut guard = state.write().await;
+            guard.public_ip = Some("203.0.113.10:8080".parse().unwrap());
+            guard.peer_ip = Some("198.51.100.20:9000".parse().unwrap());
+            guard.status = Status::Punching;
+            guard.nat_type = NatType::Symmetric;
         }
 
         let app = router(state);
+
         let request = Request::builder()
-            .uri("/api/status")
+            .uri("/api/state")
             .body(Body::empty())
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
+        let body_json: Value = serde_json::from_slice(&body_bytes).unwrap();
+        let state_obj = &body_json["state"];
 
-        assert_eq!(json, json!({ "status": "Punching" }));
+        // 2. Verify JSON matches updates
+        assert_eq!(state_obj["public_ip"], "203.0.113.10:8080");
+        assert_eq!(state_obj["peer_ip"], "198.51.100.20:9000");
+        assert_eq!(state_obj["status"], "Punching");
+        assert_eq!(state_obj["nat_type"], "Symmetric");
     }
 
     #[tokio::test]
