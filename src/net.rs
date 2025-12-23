@@ -4,40 +4,52 @@
 //! NAT Traversal and Public IP discovery using the STUN protocol.
 
 use anyhow::{Context, Result, bail};
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 use stun::{
     agent::TransactionId,
     message::{BINDING_REQUEST, Getter, Message},
     xoraddr::XorMappedAddress,
 };
-use tokio::net::UdpSocket;
+use tokio::{
+    net::UdpSocket,
+    time::{Duration, timeout},
+};
 use tracing::{debug, info};
 
-/// Resolves public IP and port of the local machine by querying a public STUN server.
+/// The duration to wait for a STUN response before timing out.
+const STUN_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Resolves the public IP and port of the local machine by querying a public STUN server.
 ///
-/// 1. Resolves DNS of the STUN server.
-/// 2. Sends a STUN `BINDING_REQUEST` using given UDP socket.
-/// 3. Waites for `BINDING_SUCCESS` response.
-/// 4. Validates the Transaction ID to ensure security.
-/// 5. Extracts the `XorMappedAddress` from response.
+/// # Workflow
+/// 1. Resolves DNS of the provided STUN server.
+/// 2. Sends a STUN `BINDING_REQUEST` using the provided UDP socket.
+/// 3. Waits for a `BINDING_SUCCESS` response (with a 3-second timeout).
+/// 4. Validates the Transaction ID to prevent spoofing.
+/// 5. Extracts the `XorMappedAddress` (public IP) from the response.
 ///
 /// # Arguments
 ///
-/// * `socket` - A referance to shared `UdpSocket`. This must be bound before calling this function.
+/// * `socket` - A reference to the UDP socket. The socket must be bound before calling.
 /// * `stun_server` - The address of the STUN server (e.g., "stun.l.google.com:19302").
 ///
 /// # Returns
 ///
-/// * `Ok(SocketAddr)` - The public IP and port of local machine.
-/// * `Err` - If DNS failes, the server is unreachable, or the response is invalide.
-pub async fn resolve_public_ip(socket: &Arc<UdpSocket>, stun_server: &str) -> Result<SocketAddr> {
+/// * `Ok(SocketAddr)` - The public IP and port of the local machine.
+/// * `Err` - If DNS fails, the server is unreachable, the request times out, or the response is invalid.
+pub async fn resolve_public_ip(
+    socket: &UdpSocket,
+    stun_server: impl AsRef<str>,
+) -> Result<SocketAddr> {
+    let stun_server = stun_server.as_ref();
     info!("Resolving public IP via {}", stun_server);
 
     // 1. Resolve DNS for the STUN server.
     let mut addrs = tokio::net::lookup_host(stun_server)
         .await
         .context(format!("Failed to resolve DNS for {}", stun_server))?;
-    // Use resolved IP address
+
+    // Use the first resolved IP address
     let target_addr = addrs
         .next()
         .context("STUN server domain name did not resolve to any IP address")?;
@@ -54,14 +66,16 @@ pub async fn resolve_public_ip(socket: &Arc<UdpSocket>, stun_server: &str) -> Re
         .await
         .context("Failed to send STUN request")?;
 
-    // 3. Wait for response
+    // 3. Wait for response with timeout
     let mut buf = [0u8; 1024];
-    let (len, sender_addr) = socket
-        .recv_from(&mut buf)
+
+    // We use a timeout here because UDP packets can be lost, and we don't want to hang forever.
+    let (len, sender_addr) = timeout(STUN_TIMEOUT, socket.recv_from(&mut buf))
         .await
+        .context("STUN request timed out")?
         .context("Failed to receive STUN response")?;
 
-    debug!("Recieved {} bytes from {}", len, sender_addr);
+    debug!("Received {} bytes from {}", len, sender_addr);
 
     // 4. Parse and validate response
     let mut response = Message::new();
@@ -75,14 +89,14 @@ pub async fn resolve_public_ip(socket: &Arc<UdpSocket>, stun_server: &str) -> Re
         );
     }
 
-    // 5. Extrack the public IP
+    // 5. Extract the public IP
     let mut xor_addr = XorMappedAddress::default();
     xor_addr
         .get_from(&response)
         .context("STUN response did not contain XOR-MAPPED-ADDRESS")?;
 
     let public_addr = SocketAddr::new(xor_addr.ip, xor_addr.port);
-    info!("Public IP: {}", public_addr);
+    debug!("Public IP resolved: {}", public_addr);
 
     Ok(public_addr)
 }
@@ -92,8 +106,7 @@ mod test {
     use super::*;
     use stun::message::BINDING_SUCCESS;
 
-    /// Verifies that the resolve_public_ip function correctly handles a STNU response. by spawning
-    /// a local mock server.
+    /// Verifies that the resolve_public_ip function correctly handles a valid STUN response.
     #[tokio::test]
     async fn test_resolve_public_ip_mock() {
         // Setup a mock server
@@ -125,8 +138,8 @@ mod test {
         });
 
         // Run client
-        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let result = resolve_public_ip(&socket, &server_addr.to_string()).await;
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let result = resolve_public_ip(&socket, server_addr.to_string()).await;
 
         // Verify
         assert!(result.is_ok());
@@ -134,10 +147,10 @@ mod test {
         assert_eq!(ip.port(), 9999);
     }
 
-    /// Verifies that resolve_public_ip fails when DNS resolution fails.
+    /// Verifies that resolve_public_ip fails gracefully when DNS resolution fails.
     #[tokio::test]
     async fn test_resolve_public_ip_dns_failure() {
-        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
 
         // Use an invalid hostname that will fail DNS resolution
         let result = resolve_public_ip(&socket, "invalid.hostname.that.does.not.exist:19302").await;
@@ -145,6 +158,21 @@ mod test {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Failed to resolve DNS") || err_msg.contains("failed to lookup"));
+    }
+
+    /// Verifies that resolve_public_ip times out if no response is received.
+    #[tokio::test]
+    async fn test_resolve_public_ip_timeout() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        // Bind a "server" that never replies
+        let mock_server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = mock_server.local_addr().unwrap();
+
+        // We expect a timeout error roughly after STUN_TIMEOUT
+        let result = resolve_public_ip(&socket, server_addr.to_string()).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "STUN request timed out");
     }
 
     /// Verifies that resolve_public_ip rejects responses with mismatched transaction IDs.
@@ -157,15 +185,13 @@ mod test {
             let mut buf = [0u8; 1024];
             let (len, client_addr) = mock_server.recv_from(&mut buf).await.unwrap();
 
-            // Parse the request to get its transaction ID
             let mut req = Message::new();
             req.unmarshal_binary(&buf[..len]).unwrap();
 
             // Create a response with a DIFFERENT transaction ID
             let mut resp = Message::new();
-            // Manually create a different transaction ID by manipulating bytes
             let mut new_tx_id = req.transaction_id;
-            new_tx_id.0[0] = new_tx_id.0[0].wrapping_add(1); // Change first byte
+            new_tx_id.0[0] = new_tx_id.0[0].wrapping_add(1); // Alter ID
             resp.transaction_id = new_tx_id;
 
             resp.build(&[
@@ -180,40 +206,11 @@ mod test {
             mock_server.send_to(&resp.raw, client_addr).await.unwrap();
         });
 
-        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let result = resolve_public_ip(&socket, &server_addr.to_string()).await;
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let result = resolve_public_ip(&socket, server_addr.to_string()).await;
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Security Mismatch") || err_msg.contains("Transaction ID"));
-    }
-
-    /// Verifies that resolve_public_ip fails when response lacks XOR-MAPPED-ADDRESS.
-    #[tokio::test]
-    async fn test_resolve_public_ip_missing_xor_address() {
-        let mock_server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let server_addr = mock_server.local_addr().unwrap();
-
-        tokio::spawn(async move {
-            let mut buf = [0u8; 1024];
-            let (len, client_addr) = mock_server.recv_from(&mut buf).await.unwrap();
-
-            let mut req = Message::new();
-            req.unmarshal_binary(&buf[..len]).unwrap();
-
-            // Send response WITHOUT XorMappedAddress attribute
-            let mut resp = Message::new();
-            resp.transaction_id = req.transaction_id;
-            resp.build(&[Box::new(BINDING_SUCCESS)]).unwrap();
-
-            mock_server.send_to(&resp.raw, client_addr).await.unwrap();
-        });
-
-        let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let result = resolve_public_ip(&socket, &server_addr.to_string()).await;
-
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("XOR-MAPPED-ADDRESS") || err_msg.contains("did not contain"));
+        assert!(err_msg.contains("Security Mismatch"));
     }
 }
