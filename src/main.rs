@@ -117,6 +117,11 @@ async fn start_controller(
         }
     };
 
+    let message_manager = Arc::new(RwLock::new(MessageManager::new(
+        Arc::clone(&socket),
+        Arc::clone(shared_state),
+    )));
+
     // 4. Command Loop with Heartbeat
     info!("Waiting for commands (NAT Keep-Alive active)...");
 
@@ -140,20 +145,11 @@ async fn start_controller(
                                 if let Some(peer_addr) = peer_ip_opt {
                                     debug!("Initiating connection to peer: {}", peer_addr);
 
-                                    // Create a new MessageManager to handle the connection lifecycle.
-                                    // This blocks asynchronously until the handshake completes or fails.
-                                    // If it fails, MessageManager handles resetting the state to Disconnected.
-                                    if let Err(e) = MessageManager::new(
-                                        Arc::clone(&socket),
-                                        peer_addr,
-                                        Arc::clone(shared_state),
-                                        config.handshake_timeout_secs,
-                                    )
-                                    .await
-                                    {
+                                    if let Err(e) = Arc::clone(&message_manager).write().await.handshake(peer_addr, config.handshake_timeout_secs).await {
                                         error!("Connection attempt failed: {:?}", e);
                                     } else {
                                         debug!("Connection established successfully. MessageManager active.");
+                                        Arc::clone(&message_manager).write().await.upgrade_to_kcp().await?;
                                     }
                                 } else {
                                     warn!("Connect command received but no peer IP is set in state.");
