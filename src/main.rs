@@ -119,7 +119,7 @@ async fn start_controller(
 
     let message_manager = Arc::new(RwLock::new(MessageManager::new(
         Arc::clone(&socket),
-        Arc::clone(&shared_state),
+        Arc::clone(shared_state),
     )));
 
     // 4. Command Loop with Heartbeat
@@ -149,6 +149,7 @@ async fn start_controller(
                                         error!("Connection attempt failed: {:?}", e);
                                     } else {
                                         debug!("Connection established successfully. MessageManager active.");
+                                        Arc::clone(&message_manager).write().await.upgrade_to_kcp().await?;
                                     }
                                 } else {
                                     warn!("Connect command received but no peer IP is set in state.");
