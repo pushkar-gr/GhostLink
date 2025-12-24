@@ -7,7 +7,7 @@ use crate::{
     config::Config,
     messaging::message_manager::MessageManager,
     web::{
-        shared_state::{AppEvent, AppState, Command, SharedState},
+        shared_state::{AppEvent, AppState, Command, SharedState, Status},
         web_server,
     },
 };
@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tokio::{
     net::UdpSocket,
     sync::{RwLock, broadcast, mpsc},
+    time::Duration,
 };
 use tracing::{debug, error, info, warn};
 
@@ -100,12 +101,15 @@ async fn start_controller(
                 None,
             );
 
+            // 3. Detect NAT type
+            let nat_type = net::get_nat_type(&socket, &config.stun_verifier, public_addr).await;
             shared_state.write().await.set_nat_type(
-                net::get_nat_type(&socket, &config.stun_verifier, public_addr).await,
+                nat_type,
                 Some("NAT type resolved.".into()),
                 None,
             );
-            debug!("Behind {:?} NAT type", shared_state.read().await.nat_type);
+
+            debug!("Behind {:?} NAT type", nat_type);
         }
         Err(e) => {
             error!("STUN Resolution Failed: {:?}", e);
@@ -113,36 +117,77 @@ async fn start_controller(
         }
     };
 
-    // 3. Command Loop (Wait for signals from the Web UI)
-    info!("Waiting for commands...");
-    while let Some(cmd) = cmd_rx.recv().await {
-        match cmd {
-            Command::ConnectPeer => {
-                debug!("Command received: ConnectPeer");
+    // 4. Command Loop with Heartbeat
+    info!("Waiting for commands (NAT Keep-Alive active)...");
 
-                // Read the target peer IP from state
-                let peer_ip_opt = shared_state.read().await.peer_ip;
+    let mut keep_alive_interval =
+        tokio::time::interval(Duration::from_secs(config.punch_hole_secs));
+    keep_alive_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-                if let Some(peer_addr) = peer_ip_opt {
-                    debug!("Initiating connection to peer: {}", peer_addr);
+    loop {
+        tokio::select! {
+            // A. Handle Commands from Web
+            cmd_opt = cmd_rx.recv() => {
+                match cmd_opt {
+                    Some(cmd) => {
+                        match cmd {
+                            Command::ConnectPeer => {
+                                debug!("Command received: ConnectPeer");
 
-                    // Create a new MessageManager to handle the connection lifecycle.
-                    // This blocks asynchronously until the handshake completes or fails.
-                    // If it fails, MessageManager handles resetting the state to Disconnected.
-                    if let Err(e) = MessageManager::new(
-                        Arc::clone(&socket),
-                        peer_addr,
-                        Arc::clone(shared_state),
-                        config.timeout_secs,
-                    )
-                    .await
-                    {
-                        error!("Connection attempt failed: {:?}", e);
-                    } else {
-                        debug!("Connection established successfully. MessageManager active.");
+                                // Read the target peer IP from state
+                                let peer_ip_opt = shared_state.read().await.peer_ip;
+
+                                if let Some(peer_addr) = peer_ip_opt {
+                                    debug!("Initiating connection to peer: {}", peer_addr);
+
+                                    // Create a new MessageManager to handle the connection lifecycle.
+                                    // This blocks asynchronously until the handshake completes or fails.
+                                    // If it fails, MessageManager handles resetting the state to Disconnected.
+                                    if let Err(e) = MessageManager::new(
+                                        Arc::clone(&socket),
+                                        peer_addr,
+                                        Arc::clone(shared_state),
+                                        config.handshake_timeout_secs,
+                                    )
+                                    .await
+                                    {
+                                        error!("Connection attempt failed: {:?}", e);
+                                    } else {
+                                        debug!("Connection established successfully. MessageManager active.");
+                                    }
+                                } else {
+                                    warn!("Connect command received but no peer IP is set in state.");
+                                }
+                            }
+                        }
                     }
-                } else {
-                    warn!("Connect command received but no peer IP is set in state.");
+                    None => {
+                        info!("Command channel closed. Controller shutting down.");
+                        break;
+                    }
+                }
+            }
+            // B. Handle Keep-Alive (Heartbeat)
+            _ = keep_alive_interval.tick() => {
+                // We only need to keep the NAT open if we are NOT connected.
+                // If we are connected, the MessageManager (chat session) handles traffic.
+                let status = shared_state.read().await.status;
+
+                if status == Status::Disconnected {
+                    debug!("Sending Keep-Alive packet to STUN server...");
+                    // Re-resolving IP sends a STUN packet, which refreshes the NAT mapping.
+                    match net::resolve_public_ip(&socket, &config.stun_server).await {
+                        Ok(addr) => {
+                            let mut state = shared_state.write().await;
+                            if state.public_ip != Some(addr) {
+                                warn!("Public IP changed! Old: {:?}, New: {}", state.public_ip, addr);
+                                state.set_public_ip(addr, Some("Public IP Changed".into()), None);
+                            }
+                        }
+                        Err(e) => {
+                            debug!("Keep-alive STUN check failed: {}", e);
+                        }
+                    }
                 }
             }
         }

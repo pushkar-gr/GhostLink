@@ -4,7 +4,8 @@ pub struct Config {
     pub stun_server: String,
     pub stun_verifier: String,
     pub web_port: u16,
-    pub timeout_secs: u64,
+    pub handshake_timeout_secs: u64,
+    pub punch_hole_secs: u64,
 }
 
 impl Config {
@@ -14,7 +15,8 @@ impl Config {
             stun_server: "stun.l.google.com:19302".to_string(),
             stun_verifier: "stun4.l.google.com:19302".to_string(),
             web_port: 8080,
-            timeout_secs: 30,
+            handshake_timeout_secs: 30,
+            punch_hole_secs: 15,
         }
     }
 }
