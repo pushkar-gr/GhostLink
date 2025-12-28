@@ -1,7 +1,6 @@
-//! Network module for GhostLink.
+//! Network utilities for GhostLink.
 //!
-//! This module handles low-level networking operations, specifically
-//! NAT Traversal and Public IP discovery using the STUN protocol.
+//! Handles NAT traversal and public IP discovery using STUN.
 
 use super::web::shared_state::NatType;
 use anyhow::{Context, Result, bail};
@@ -15,20 +14,20 @@ use tokio::{
     net::UdpSocket,
     time::{Duration, timeout},
 };
-use tracing::{debug, info};
+use tracing::debug;
 
 /// The duration to wait for a STUN response before timing out.
 const STUN_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Resolves the local IP address by connecting to a public DNS server.
+/// Resolves the local IP address using a DNS server.
 ///
-/// This method uses a trick: connecting to a remote address (without actually sending data)
-/// causes the OS to select the appropriate local interface and IP address.
+/// Connecting to a remote address causes the OS
+/// to select the appropriate local interface and IP.
 ///
 /// # Returns
 ///
-/// * `Ok(SocketAddr)` - The local IP address and port.
-/// * `Err` - If the operation fails.
+/// * `Ok(SocketAddr)` - Local IP and port
+/// * `Err` - If resolution fails
 pub async fn get_local_ip(local_port: u16) -> Result<SocketAddr> {
     // Connect to Google's public DNS (we don't send any data)
     let socket = UdpSocket::bind(("0.0.0.0", 0)).await?;
@@ -44,30 +43,30 @@ pub async fn get_local_ip(local_port: u16) -> Result<SocketAddr> {
     Ok(local_ip)
 }
 
-/// Resolves the public IP and port of the local machine by querying a public STUN server.
+/// Discovers public IP and port using STUN.
 ///
-/// # Workflow
-/// 1. Resolves DNS of the provided STUN server.
-/// 2. Sends a STUN `BINDING_REQUEST` using the provided UDP socket.
-/// 3. Waits for a `BINDING_SUCCESS` response (with a 3-second timeout).
-/// 4. Validates the Transaction ID to prevent spoofing.
-/// 5. Extracts the `XorMappedAddress` (public IP) from the response.
+/// Workflow:
+/// 1. Resolves STUN server DNS
+/// 2. Sends BINDING_REQUEST
+/// 3. Waits for response (3 second timeout)
+/// 4. Validates transaction ID
+/// 5. Extracts public address
 ///
 /// # Arguments
 ///
-/// * `socket` - A reference to the UDP socket. The socket must be bound before calling.
-/// * `stun_server` - The address of the STUN server (e.g., "stun.l.google.com:19302").
+/// * `socket` - Bound UDP socket
+/// * `stun_server` - STUN server address (e.g., "stun.l.google.com:19302")
 ///
 /// # Returns
 ///
-/// * `Ok(SocketAddr)` - The public IP and port of the local machine.
-/// * `Err` - If DNS fails, the server is unreachable, the request times out, or the response is invalid.
+/// * `Ok(SocketAddr)` - Public IP and port
+/// * `Err` - If DNS, network, or STUN validation fails
 pub async fn resolve_public_ip(
     socket: &UdpSocket,
     stun_server: impl AsRef<str>,
 ) -> Result<SocketAddr> {
     let stun_server = stun_server.as_ref();
-    info!("Resolving public IP via {}", stun_server);
+    debug!("Querying STUN server: {}", stun_server);
 
     // 1. Resolve DNS for the STUN server.
     let mut addrs = tokio::net::lookup_host(stun_server)
@@ -126,19 +125,21 @@ pub async fn resolve_public_ip(
     Ok(public_addr)
 }
 
-/// Checks if user is behind a symittric network.
-/// Resolves the public IP by querying another public STUN server and validates with previous
-/// response.
+/// Detects NAT type by querying a second STUN server.
+///
+/// Compares the public port from two different STUN servers:
+/// - Same port → Cone NAT (P2P-friendly)
+/// - Different port → Symmetric NAT (P2P-difficult)
 ///
 /// # Arguments
 ///
-/// * `socket` - A reference to the UDP socket. The socket must be bound before calling.
-/// * `stun_server` - The address of the STUN server (e.g., "stun.l.google.com:19302").
-/// * `prev_addr` - The address resolved by previous STUN.
+/// * `socket` - Bound UDP socket
+/// * `stun_server` - Second STUN server address
+/// * `prev_addr` - Address from first STUN query
 ///
 /// # Returns
 ///
-/// * `NatType` - Indicates the type of NAT user's router is using.
+/// NAT type: Cone, Symmetric, or Unknown
 pub async fn get_nat_type(
     socket: &UdpSocket,
     stun_server: impl AsRef<str>,

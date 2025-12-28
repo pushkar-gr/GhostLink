@@ -143,6 +143,8 @@ function handleStatusChange(statusStr, data = {}) {
     // CASE A: Disconnected Event via SSE (AppEvent::Disconnected { state })
     if (normStatus === 'DISCONNECTED' && data.state) {
         syncState(data.state);
+        // Update UI to reflect any changes in public/local IP
+        renderMyInfo(true);
     }
     // CASE B: Standard AppState via REST API (/api/state) or top-level event fields
     // (Note: syncState calls handleStatusChange, so we avoid infinite recursion by not calling syncState back)

@@ -20,23 +20,24 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
-/// The main entry point for the GhostLink application.
+/// Main entry point for the GhostLink application.
 ///
-/// It initializes the application components:
-/// 1. Loads configuration.
-/// 2. Sets up communication channels (Command & Event loops).
-/// 3. Initializes the shared application state.
-/// 4. Starts the Web Server (UI).
-/// 5. Starts the Controller (Networking & Logic).
+/// Initializes and starts:
+/// 1. Logging system
+/// 2. Configuration
+/// 3. Communication channels
+/// 4. Application state
+/// 5. Web server
+/// 6. Network controller
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    info!("GhostLink v1.0 Starting...");
+    info!("Starting GhostLink v1.0");
 
     // Load configuration
     let config = Config::load();
-    info!("Config loaded successfully.");
+    debug!("Configuration loaded successfully");
 
     // Create channels for communication between Web Server and Controller
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(32);
@@ -51,14 +52,14 @@ async fn main() -> Result<()> {
     let web_server_handle = tokio::spawn(async move {
         let port = config.web_port;
         if let Err(e) = web_server::serve(state_clone, port).await {
-            error!("Web server crashed: {:?}", e);
+            error!("Web server error: {:?}", e);
         }
     });
 
     // Start the Controller (Main Logic)
     // We await this as it runs the main event loop
     if let Err(e) = start_controller(&config, &shared_state, cmd_rx).await {
-        error!("Controller encountered a critical error: {:?}", e);
+        error!("Controller error: {:?}", e);
     }
 
     // Wait for web server (optional, usually controller keeps app alive)
@@ -67,12 +68,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Starts the main controller logic.
+/// Starts the main network controller.
 ///
-/// This function:
-/// 1. Binds the UDP socket.
-/// 2. Performs STUN resolution to find the public IP.
-/// 3. Enters a command loop to handle user actions (like "Connect").
+/// Responsibilities:
+/// 1. Binds UDP socket
+/// 2. Resolves public IP via STUN
+/// 3. Detects NAT type
+/// 4. Handles commands and incoming messages
+/// 5. Maintains NAT mappings via keep-alive
 async fn start_controller(
     config: &Config,
     shared_state: &SharedState,
@@ -84,12 +87,12 @@ async fn start_controller(
     let socket = Arc::new(socket);
 
     let local_port = socket.local_addr()?.port();
-    info!("UDP Socket bound locally to port: {}", local_port);
+    info!("UDP socket bound to port {}", local_port);
 
-    // 1.5. Resolve Local IP
+    // 2. Resolve Local IP
     match net::get_local_ip(local_port).await {
         Ok(local_addr) => {
-            info!("Local IP resolved: {}", local_addr);
+            info!("Local IP: {}", local_addr);
             shared_state.write().await.set_local_ip(
                 local_addr,
                 Some("Local IP resolved".into()),
@@ -97,45 +100,44 @@ async fn start_controller(
             );
         }
         Err(e) => {
-            warn!("Failed to resolve local IP: {:?}", e);
+            warn!("Could not resolve local IP: {:?}", e);
         }
     }
 
-    // 2. Resolve Public IP via STUN
+    // 3. Resolve Public IP via STUN
     // Note: We pass a reference to the socket. net::resolve_public_ip now expects &UdpSocket.
     match net::resolve_public_ip(&socket, &config.stun_server).await {
         Ok(public_addr) => {
-            info!("STUN Success! Your Public IP is: {}", public_addr);
-            info!("Share this address with your peer to connect.");
+            info!("Public IP resolved via STUN: {}", public_addr);
 
             // Update state safely using the setter.
             // This triggers an event update so the UI displays the IP immediately.
             shared_state.write().await.set_public_ip(
                 public_addr,
-                Some("STUN Resolution Successful".into()),
+                Some("Public IP resolved".into()),
                 None,
             );
 
-            // 3. Detect NAT type
+            // 4. Detect NAT type
             let nat_type = net::get_nat_type(&socket, &config.stun_verifier, public_addr).await;
             shared_state.write().await.set_nat_type(
                 nat_type,
-                Some("NAT type resolved.".into()),
+                Some("NAT type detected".into()),
                 None,
             );
 
-            debug!("Behind {:?} NAT type", nat_type);
+            info!("NAT type: {:?}", nat_type);
         }
         Err(e) => {
-            error!("STUN Resolution Failed: {:?}", e);
-            warn!("You may not be reachable from the internet.");
+            error!("STUN resolution failed: {:?}", e);
+            warn!("Cannot accept incoming connections without public IP");
         }
     };
 
     let mut message_manager = MessageManager::new(Arc::clone(&socket), Arc::clone(shared_state));
 
-    // 4. Command Loop with Heartbeat
-    info!("Waiting for commands (NAT Keep-Alive active)...");
+    // 5. Command Loop with Keep-Alive
+    info!("Ready to accept commands");
 
     let mut keep_alive_interval =
         tokio::time::interval(Duration::from_secs(config.punch_hole_secs));
@@ -151,22 +153,22 @@ async fn start_controller(
                     Some(cmd) => {
                         match cmd {
                             Command::ConnectPeer => {
-                                debug!("Command received: ConnectPeer");
+                                info!("Initiating peer connection");
 
                                 // Read the target peer IP from state
                                 let peer_ip_opt = shared_state.read().await.peer_ip;
 
                                 if let Some(peer_addr) = peer_ip_opt {
-                                    debug!("Initiating connection to peer: {}", peer_addr);
+                                    debug!("Connecting to peer: {}", peer_addr);
 
                                     if let Err(e) = message_manager.handshake(peer_addr, config.handshake_timeout_secs).await {
-                                        error!("Connection attempt failed: {:?}", e);
+                                        error!("Handshake failed: {:?}", e);
                                     } else {
-                                        debug!("Connection established successfully. MessageManager active.");
+                                        info!("Connection established with peer");
                                         message_manager.upgrade_to_kcp().await?;
                                     }
                                 } else {
-                                    warn!("Connect command received but no peer IP is set in state.");
+                                    warn!("Cannot connect: no peer IP configured");
                                 }
                             }
 
@@ -176,16 +178,16 @@ async fn start_controller(
                                         Ok(_) => {
                                             shared_state.read().await.add_message(msg, true);
                                         },
-                                        Err(e) => error!("Failed to send KCP message: {}", e),
+                                        Err(e) => error!("Message send failed: {}", e),
                                     }
                                 } else {
-                                    warn!("Cannot send message: Not connected.");
+                                    warn!("Cannot send message: not connected to peer");
                                 }
                             }
                         }
                     }
                     None => {
-                        info!("Command channel closed. Controller shutting down.");
+                        info!("Command channel closed, shutting down");
                         break;
                     }
                 }
@@ -197,11 +199,11 @@ async fn start_controller(
                 match res {
                     Ok(n) => {
                         let msg_str = String::from_utf8_lossy(&recv_buf[..n]).to_string();
-                        info!("Received message: {}", msg_str);
+                        debug!("Received message from peer: {}", msg_str);
                         shared_state.read().await.add_message(msg_str, false);
                     },
                     Err(e) => {
-                        error!("Error reading from KCP stream: {}", e);
+                        error!("KCP stream error: {}", e);
                     }
                 }
             }
@@ -213,14 +215,14 @@ async fn start_controller(
                 let status = shared_state.read().await.status;
 
                 if status == Status::Disconnected {
-                    debug!("Sending Keep-Alive packet to STUN server...");
-                    // Re resolving IP sends a STUN packet, which refreshes the NAT mapping.
+                    debug!("Sending NAT keep-alive to STUN server");
+                    // Re-resolving IP sends a STUN packet, which refreshes the NAT mapping.
                     match net::resolve_public_ip(&socket, &config.stun_server).await {
                         Ok(addr) => {
                             let mut state = shared_state.write().await;
                             if state.public_ip != Some(addr) {
-                                warn!("Public IP changed! Old: {:?}, New: {}", state.public_ip, addr);
-                                state.set_public_ip(addr, Some("Public IP Changed".into()), None);
+                                info!("Public IP changed from {:?} to {}", state.public_ip, addr);
+                                state.set_public_ip(addr, Some("Public IP updated".into()), None);
                             }
                         }
                         Err(e) => {

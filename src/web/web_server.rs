@@ -1,9 +1,9 @@
-//! Web server module for GhostLink.
+//! Web server for GhostLink.
 //!
-//! This module handles the HTTP layer of the application. It serves:
-//! 1. The Static UI files (HTML/JS/CSS) from the `static/` directory.
-//! 2. The API endpoints (e.g., status, configuration) for the frontend.
-//! 3. Server Sent Events (SSE) for real time state updates.
+//! Provides:
+//! 1. Static UI (HTML/JS/CSS)
+//! 2. REST API endpoints
+//! 3. Server-Sent Events (SSE) for real-time updates
 
 use super::shared_state::{Command, SharedState, Status};
 use anyhow::Result;
@@ -30,12 +30,12 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::{debug, error, info};
 
-/// Starts the HTTP server on the specified port.
+/// Starts the HTTP server.
 ///
 /// # Arguments
 ///
-/// * `shared_state` - The thread safe application state.
-/// * `port` - The port number to listen on (e.g., 8080).
+/// * `shared_state` - Thread-safe application state
+/// * `port` - Port to listen on
 pub async fn serve(shared_state: SharedState, port: u16) -> Result<()> {
     let app = router(shared_state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -48,11 +48,11 @@ pub async fn serve(shared_state: SharedState, port: u16) -> Result<()> {
     Ok(())
 }
 
-/// Creates the Axum Router with all routes and middleware configured.
+/// Creates the Axum router with all routes and middleware.
 pub fn router(shared_state: SharedState) -> Router {
     Router::new()
         // API Routes
-        .route("/api/state", get(get_ip))
+        .route("/api/state", get(get_state))
         .route("/api/connect", post(connect_peer))
         .route("/api/message", post(send_message))
         .route("/api/events", get(sse_handler))
@@ -65,9 +65,9 @@ pub fn router(shared_state: SharedState) -> Router {
 
 // --- API Handlers ---
 
-/// Handler for `GET /api/ip`.
-/// Returns the public IP and port of the local node (if resolved).
-async fn get_ip(State(state): State<SharedState>) -> impl IntoResponse {
+/// Handler for `GET /api/state`.
+/// Returns current application state including IPs, NAT type, and status.
+async fn get_state(State(state): State<SharedState>) -> impl IntoResponse {
     let data = state.read().await;
     Json(json!({ "state": data.clone() }))
 }
@@ -79,7 +79,7 @@ struct ConnectionRequest {
 }
 
 /// Handler for `POST /api/connect`.
-/// Validates input, updates state, and triggers the connection controller.
+/// Validates peer IP and triggers connection process.
 async fn connect_peer(
     State(state): State<SharedState>,
     Json(input): Json<ConnectionRequest>,
@@ -156,7 +156,7 @@ async fn send_message(
 }
 
 /// Handler for `GET /api/events`.
-/// Upgrades the connection to a Server Sent Events (SSE) stream.
+/// Establishes SSE stream for real-time state updates.
 async fn sse_handler(
     State(state): State<SharedState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -355,5 +355,100 @@ mod tests {
             response.headers().get("content-type").unwrap(),
             "text/event-stream"
         );
+    }
+
+    /// Verifies that updating public IP triggers a broadcast event.
+    #[tokio::test]
+    async fn test_public_ip_update_broadcasts_event() {
+        let state = create_test_state();
+
+        // Subscribe to events before updating
+        let mut event_rx = state.read().await.subscribe_events();
+
+        // Update public IP
+        {
+            let mut guard = state.write().await;
+            guard.set_public_ip(
+                "203.0.113.10:8080".parse().unwrap(),
+                Some("Public IP resolved".into()),
+                None,
+            );
+        }
+
+        // Verify event was broadcast
+        let event = event_rx.recv().await.unwrap();
+        match event {
+            AppEvent::Disconnected { state: app_state } => {
+                assert_eq!(
+                    app_state.public_ip.unwrap().to_string(),
+                    "203.0.113.10:8080"
+                );
+            }
+            _ => panic!("Expected Disconnected event"),
+        }
+    }
+
+    /// Verifies that public IP changes are detected and broadcast correctly.
+    #[tokio::test]
+    async fn test_public_ip_change_detection() {
+        let state = create_test_state();
+
+        // Set initial IP
+        {
+            let mut guard = state.write().await;
+            guard.set_public_ip(
+                "203.0.113.10:8080".parse().unwrap(),
+                Some("Initial IP".into()),
+                None,
+            );
+        }
+
+        // Subscribe after initial setup
+        let mut event_rx = state.read().await.subscribe_events();
+
+        // Change IP
+        {
+            let mut guard = state.write().await;
+            let old_ip = guard.public_ip;
+            let new_ip: SocketAddr = "203.0.113.20:8080".parse().unwrap();
+
+            assert_ne!(old_ip, Some(new_ip));
+
+            guard.set_public_ip(new_ip, Some("Public IP updated".into()), None);
+        }
+
+        // Verify event contains new IP
+        let event = event_rx.recv().await.unwrap();
+        match event {
+            AppEvent::Disconnected { state: app_state } => {
+                assert_eq!(
+                    app_state.public_ip.unwrap().to_string(),
+                    "203.0.113.20:8080"
+                );
+            }
+            _ => panic!("Expected Disconnected event with updated IP"),
+        }
+    }
+
+    /// Verifies that NAT type updates are broadcast correctly.
+    #[tokio::test]
+    async fn test_nat_type_update_broadcasts_event() {
+        let state = create_test_state();
+        let mut event_rx = state.read().await.subscribe_events();
+
+        // Update NAT type
+        {
+            let mut guard = state.write().await;
+            guard.set_nat_type(NatType::Cone, Some("NAT type detected".into()), None);
+        }
+
+        // Verify event
+        let event = event_rx.recv().await.unwrap();
+        match event {
+            AppEvent::Disconnected { state: app_state } => {
+                assert_eq!(app_state.nat_type, NatType::Cone);
+            }
+            _ => panic!("Expected Disconnected event"),
+        }
     }
 }
