@@ -21,20 +21,33 @@
         <div id="view-home" class="view-section active">
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: end; margin-bottom: 0.75rem;">
-                    <label class="label" style="margin-bottom: 0;">Your Public Endpoint</label>
+                    <label class="label" style="margin-bottom: 0;">Your Endpoints</label>
                     <span id="natTypeDisplay" class="nat-badge">Detecting NAT...</span>
                 </div>
                 
-                <div class="ip-display-group">
-                    <span class="ip-text" id="myIpDisplay">Initializing...</span>
-                    
-                    <div class="action-buttons">
-                        <button class="icon-btn" id="refreshBtn" title="Refresh State">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                        </button>
-                        <button class="icon-btn" id="copyBtn" title="Copy to Clipboard">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                        </button>
+                <div style="margin-bottom: 0.75rem;">
+                    <label class="label" style="font-size: 0.8rem; margin-bottom: 0.25rem;">Public (Internet):</label>
+                    <div class="ip-display-group">
+                        <span class="ip-text" id="myIpDisplay">Initializing...</span>
+                        
+                        <div class="action-buttons">
+                            <button class="icon-btn" id="copyBtn" title="Copy to Clipboard">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" style="font-size: 0.8rem; margin-bottom: 0.25rem;">Local (Network):</label>
+                    <div class="ip-display-group">
+                        <span class="ip-text" id="myLocalIpDisplay">Initializing...</span>
+                        
+                        <div class="action-buttons">
+                            <button class="icon-btn" id="copyLocalBtn" title="Copy to Clipboard">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div id="apiErrorMsg" class="error-msg" style="margin-top: 0.5rem; text-align: center;"></div>
@@ -133,7 +146,6 @@
     </div>
 
     <div class="toast" id="toast">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
         <span class="toast-msg">Notification</span>
     </div>
 

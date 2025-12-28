@@ -2,66 +2,57 @@ use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{RwLock, broadcast, mpsc};
 
-/// A thread safe wrapper around the application state.
+/// Thread-safe wrapper for application state.
 ///
-/// This alias allows multiple parts of the application (e.g., the web server
-/// and the P2P controller) to share and modify the state concurrently.
+/// Allows the web server and network controller to share state concurrently.
 pub type SharedState = Arc<RwLock<AppState>>;
 
-/// Represents the core runtime state of the GhostLink application.
+/// Core application state.
 ///
-/// This struct serves as the "source of truth" for the application's status.
-/// It holds network information (IPs, NAT type) and connectivity status.
+/// Holds network information and connectivity status.
 ///
-/// # Architecture
-/// This struct is shared between:
-/// 1. The **Controller**: Handles P2P logic, STUN resolution, and connection management.
-/// 2. The **Web Server**: Serves the UI and streams state updates to the frontend via SSE/WebSocket.
+/// Shared between:
+/// - Network controller (manages P2P, STUN, connections)
+/// - Web server (serves UI and streams updates via SSE)
 ///
-/// # Serialization
-/// Fields marked with `#[serde(skip)]` are excluded from JSON serialization
-/// because they are runtime control channels, not persistent state data.
+/// Fields marked `#[serde(skip)]` are excluded from JSON serialization
+/// as they're internal control channels.
 #[derive(Debug, Serialize, Clone)]
 pub struct AppState {
-    /// The public IP address and port of this node, as seen by the STUN server.
-    ///
-    /// This is `None` initially and is populated once STUN resolution succeeds.
+    /// Local IP and port (for LAN connections).
+    pub local_ip: Option<SocketAddr>,
+
+    /// Public IP and port (resolved via STUN).
     pub public_ip: Option<SocketAddr>,
 
-    /// The type of NAT (Network Address Translation) detected by the router.
-    /// This determines the compatibility of P2P connections.
+    /// NAT type detected by the router.
     pub nat_type: NatType,
 
-    /// The current operational status of the P2P node.
+    /// Current connection status.
     pub status: Status,
 
-    /// The IP address of the peer we are connecting to or are connected with.
-    ///
-    /// This is `None` until a valid handshake is initiated.
+    /// Peer's IP address.
     pub peer_ip: Option<SocketAddr>,
 
-    /// Channel to send commands *to* the background controller task.
-    ///
-    /// Used by the web server to trigger actions like "Connect".
+    /// Channel for sending commands to the controller.
     #[serde(skip)]
     cmd_tx: mpsc::Sender<Command>,
 
-    /// Channel to broadcast state change events *to* the web UI.
-    ///
-    /// The web server subscribes to this to push updates to the frontend.
+    /// Channel for broadcasting state changes to the UI.
     #[serde(skip)]
     event_tx: broadcast::Sender<AppEvent>,
 }
 
 impl AppState {
-    /// Creates a new instance of the application state with default values.
+    /// Creates a new application state with default values.
     ///
     /// # Arguments
     ///
-    /// * `cmd_tx` - Channel for sending commands to the controller.
-    /// * `event_tx` - Channel for broadcasting events to the UI.
+    /// * `cmd_tx` - Channel for sending commands to controller
+    /// * `event_tx` - Channel for broadcasting events to UI
     pub fn new(cmd_tx: mpsc::Sender<Command>, event_tx: broadcast::Sender<AppEvent>) -> Self {
         Self {
+            local_ip: None,
             public_ip: None,
             nat_type: NatType::default(),
             status: Status::default(),
@@ -71,20 +62,31 @@ impl AppState {
         }
     }
 
-    /// Returns a reference to the command sender channel.
+    /// Returns the command sender channel.
     pub fn cmd_tx(&self) -> &mpsc::Sender<Command> {
         &self.cmd_tx
     }
 
-    /// Creates a new subscriber for the event broadcast channel.
+    /// Creates a new event subscriber.
     pub fn subscribe_events(&self) -> broadcast::Receiver<AppEvent> {
         self.event_tx.subscribe()
     }
 
-    // -- State Mutators --
-    // These methods update the state and automatically broadcast the change to the UI.
+    // -- State Setters --
+    // These methods update state and broadcast changes to listeners.
 
-    /// Updates the public IP address and notifies listeners.
+    /// Updates local IP and notifies listeners.
+    pub fn set_local_ip(
+        &mut self,
+        addr: SocketAddr,
+        message: Option<String>,
+        timeout: Option<u64>,
+    ) {
+        self.local_ip = Some(addr);
+        self.broadcast_status_change(message, timeout);
+    }
+
+    /// Updates public IP and notifies listeners.
     pub fn set_public_ip(
         &mut self,
         addr: SocketAddr,
@@ -95,7 +97,7 @@ impl AppState {
         self.broadcast_status_change(message, timeout);
     }
 
-    /// Updates the NAT type and notifies listeners.
+    /// Updates NAT type and notifies listeners.
     #[allow(dead_code)]
     pub fn set_nat_type(
         &mut self,
@@ -107,22 +109,22 @@ impl AppState {
         self.broadcast_status_change(message, timeout);
     }
 
-    /// Updates the connection status and notifies listeners.
+    /// Updates connection status and notifies listeners.
     pub fn set_status(&mut self, status: Status, message: Option<String>, timeout: Option<u64>) {
         self.status = status;
         self.broadcast_status_change(message, timeout);
     }
 
-    /// Updates the peer's IP address and notifies listeners.
+    /// Updates peer IP and notifies listeners.
     pub fn set_peer_ip(&mut self, addr: SocketAddr, message: Option<String>, timeout: Option<u64>) {
         self.peer_ip = Some(addr);
         self.broadcast_status_change(message, timeout);
     }
 
-    /// Broadcasts the current state to all active listeners (e.g., Web UI).
+    /// Broadcasts current state to all active listeners.
     ///
-    /// This constructs an `AppEvent` based on the current `status` and sends it
-    /// via the `event_tx` channel.
+    /// Constructs an event based on the current status and sends it
+    /// via the event channel.
     fn broadcast_status_change(&self, message: Option<String>, timeout: Option<u64>) {
         let event = match self.status {
             // When disconnected, we send the full state so the UI can sync up.
@@ -137,57 +139,55 @@ impl AppState {
         self.broadcast_event(event);
     }
 
-    /// Explicitly broadcasts a new chat message to the UI.
+    /// Broadcasts a chat message to the UI.
     pub fn add_message(&self, content: String, from_me: bool) {
         let _ = self.event_tx.send(AppEvent::Message { content, from_me });
     }
 
-    /// General helper for other updates if needed
+    /// Broadcasts an event to the UI.
     fn broadcast_event(&self, event: AppEvent) {
         let _ = self.event_tx.send(event);
     }
 }
 
-/// Represents the NAT (Network Address Translation) type of the network.
+/// NAT (Network Address Translation) type.
 ///
-/// This classification helps determine if a direct P2P connection is feasible.
+/// Determines if direct P2P connections are possible.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
 pub enum NatType {
-    /// NAT type has not yet been determined (STUN pending).
+    /// NAT type not yet determined.
     #[default]
     Unknown,
-    /// Cone NAT: The router uses a consistent external port for internal clients.
-    /// This is **favorable** for P2P hole punching.
+    /// Cone NAT: Uses consistent external port (P2P-friendly).
     Cone,
-    /// Symmetric NAT: The router assigns different external ports for different destinations.
-    /// This is **unfavorable** and difficult for P2P hole punching.
+    /// Symmetric NAT: Uses different external ports per destination (P2P-difficult).
     Symmetric,
 }
 
-/// Represents a distinct event sent from the server to the Web UI.
+/// Event sent from server to UI.
 ///
-/// The structure of the event changes based on the application's connection status.
+/// Structure varies based on connection status.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AppEvent {
-    /// The application is idle or disconnected.
+    /// Application is idle or disconnected.
     ///
-    /// Payload includes the full `AppState` to ensure the UI is fully synchronized.
+    /// Includes full state for UI synchronization.
     Disconnected {
         state: AppState,
     },
 
-    /// The application is actively trying to punch a hole through the NAT.
+    /// Attempting NAT hole punching.
     Punching {
-        /// Time remaining (in seconds) for the handshake attempt.
+        /// Time remaining for handshake attempt (seconds).
         timeout: Option<u64>,
-        /// Logs (e.g., hole punched/ACK received).
+        /// Log messages.
         message: Option<String>,
     },
 
-    /// A P2P connection has been successfully established.
+    /// P2P connection established.
     Connected {
-        /// Informational message from the peer or system.
+        /// System or peer message.
         message: Option<String>,
     },
 
@@ -197,25 +197,26 @@ pub enum AppEvent {
     },
 }
 
-/// Represents the high level connection state of the P2P node.
+/// Connection state of the P2P node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Status {
-    /// The node is idle and waiting for user input or STUN resolution.
+    /// Idle, waiting for user input.
     #[default]
     Disconnected,
 
-    /// The node is actively performing the hole punching handshake.
+    /// Performing hole punching handshake.
     Punching,
 
-    /// The node has successfully established a P2P session with a peer.
+    /// P2P session established.
     Connected,
 }
 
-/// Commands sent from the Web Interface (or other drivers) to the Controller.
+/// Commands from Web UI to Controller.
 #[derive(Debug)]
 pub enum Command {
-    /// Instructs the controller to initiate a connection attempt to the configured peer.
+    /// Initiate connection to configured peer.
     ConnectPeer,
 
+    /// Sends a message
     SendMessage(String),
 }

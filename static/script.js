@@ -1,6 +1,7 @@
 // --- State Management ---
 const state = {
     fullAddress: null,
+    localAddress: null,
     peerAddress: null,
     natType: 'Unknown',
     connectionStatus: 'disconnected', // disconnected, punching, connected
@@ -24,10 +25,11 @@ const els = {
 
     // Home
     myIpDisplay: document.getElementById('myIpDisplay'),
+    myLocalIpDisplay: document.getElementById('myLocalIpDisplay'),
     natTypeDisplay: document.getElementById('natTypeDisplay'), // New NAT Element
     apiErrorMsg: document.getElementById('apiErrorMsg'),
     copyBtn: document.getElementById('copyBtn'),
-    refreshBtn: document.getElementById('refreshBtn'),
+    copyLocalBtn: document.getElementById('copyLocalBtn'),
     connectForm: document.getElementById('connectForm'),
     peerIpInput: document.getElementById('peerIp'),
     peerPortInput: document.getElementById('peerPort'),
@@ -71,10 +73,6 @@ async function init() {
  * Replaces old /api/ip, /api/status, and /api/peer calls.
  */
 async function fetchState() {
-    if (els.refreshBtn) {
-        els.refreshBtn.classList.add('spin');
-        els.refreshBtn.disabled = true;
-    }
     els.myIpDisplay.style.opacity = '0.5';
 
     try {
@@ -100,10 +98,6 @@ async function fetchState() {
         renderMyInfo(false);
     } finally {
         setTimeout(() => {
-            if (els.refreshBtn) {
-                els.refreshBtn.classList.remove('spin');
-                els.refreshBtn.disabled = false;
-            }
             els.myIpDisplay.style.opacity = '1';
         }, 500);
     }
@@ -119,17 +113,20 @@ function syncState(data) {
     // 1. Public IP
     if (data.public_ip) state.fullAddress = data.public_ip;
     
-    // 2. Peer IP
+    // 2. Local IP
+    if (data.local_ip) state.localAddress = data.local_ip;
+    
+    // 3. Peer IP
     if (data.peer_ip) state.peerAddress = data.peer_ip;
     else if (data.peer_ip === null) state.peerAddress = null; // Explicit reset
 
-    // 3. NAT Type (New)
+    // 4. NAT Type (New)
     if (data.nat_type) {
         state.natType = data.nat_type;
         renderNatType();
     }
 
-    // 4. Status
+    // 5. Status
     if (data.status) {
         // reuse handleStatusChange to trigger UI transitions if needed,
         // but strictly speaking, fetchState is usually for init/refresh.
@@ -146,6 +143,8 @@ function handleStatusChange(statusStr, data = {}) {
     // CASE A: Disconnected Event via SSE (AppEvent::Disconnected { state })
     if (normStatus === 'DISCONNECTED' && data.state) {
         syncState(data.state);
+        // Update UI to reflect any changes in public/local IP
+        renderMyInfo(true);
     }
     // CASE B: Standard AppState via REST API (/api/state) or top-level event fields
     // (Note: syncState calls handleStatusChange, so we avoid infinite recursion by not calling syncState back)
@@ -297,6 +296,17 @@ function renderMyInfo(success) {
         els.apiErrorMsg.style.display = 'block';
         els.copyBtn.style.display = 'none';
     }
+
+    // Render local IP
+    if (success && state.localAddress) {
+        els.myLocalIpDisplay.innerText = state.localAddress;
+        els.myLocalIpDisplay.classList.remove('error');
+        els.copyLocalBtn.style.display = 'flex';
+    } else {
+        els.myLocalIpDisplay.innerText = "Not Available";
+        els.myLocalIpDisplay.classList.add('error');
+        els.copyLocalBtn.style.display = 'none';
+    }
 }
 
 function addLog(message) {
@@ -369,7 +379,23 @@ function copyToClipboard() {
         textarea.select();
         try {
             document.execCommand('copy');
-            showToast("Copied to clipboard");
+            showToast("Public IP copied to clipboard");
+        } catch (err) {
+            console.error('Copy failed', err);
+        }
+        document.body.removeChild(textarea);
+    }
+}
+
+function copyLocalToClipboard() {
+    if (state.localAddress) {
+        const textarea = document.createElement('textarea');
+        textarea.value = state.localAddress;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            showToast("Local IP copied to clipboard");
         } catch (err) {
             console.error('Copy failed', err);
         }
@@ -382,8 +408,36 @@ const validators = {
     port: (p) => { const n = parseInt(p, 10); return !isNaN(n) && n > 0 && n <= 65535; }
 };
 
+/**
+ * Parses IP:Port format and populates both fields if detected.
+ * Returns true if parsing happened, false otherwise.
+ */
+function parseIpPort(inputValue) {
+    const match = inputValue.match(/^([0-9.]+):(\d+)$/);
+    if (match) {
+        const [, ip, port] = match;
+        if (validators.ip(ip) && validators.port(port)) {
+            els.peerIpInput.value = ip;
+            els.peerPortInput.value = port;
+            return true;
+        }
+    }
+    return false;
+}
+
 function handleIpValidation(eventType) {
     const val = els.peerIpInput.value.trim();
+    
+    // Try to parse IP:Port format on paste
+    if (eventType === 'input' && val.includes(':')) {
+        if (parseIpPort(val)) {
+            // Successfully parsed, validate both fields
+            handleIpValidation('input');
+            handlePortValidation();
+            return;
+        }
+    }
+    
     const isValid = validators.ip(val);
     state.isIpValid = isValid;
     if (isValid) {
@@ -426,8 +480,7 @@ function handlePortValidation() {
 
 function setupEventListeners() {
     if(els.copyBtn) els.copyBtn.addEventListener('click', copyToClipboard);
-    // Updated listener: "Refresh" now calls the unified fetchState
-    if(els.refreshBtn) els.refreshBtn.addEventListener('click', fetchState);
+    if(els.copyLocalBtn) els.copyLocalBtn.addEventListener('click', copyLocalToClipboard);
     els.connectForm.addEventListener('submit', handleConnect);
     els.disconnectBtn.addEventListener('click', handleDisconnect);
     els.peerIpInput.addEventListener('input', () => handleIpValidation('input'));

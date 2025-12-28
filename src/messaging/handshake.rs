@@ -47,6 +47,11 @@ pub async fn handshake(
     let mut send_interval = tokio::time::interval(Duration::from_millis(500));
     send_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    // Track if client received SYN-ACK
+    let mut received_syn_ack = false;
+    // Track if client sent SYN-ACK
+    let mut sent_syn_ack = false;
+
     info!("Starting handshake with {}", peer_addr);
 
     // Update initial state
@@ -97,17 +102,39 @@ pub async fn handshake(
 
                             let reply = bincode::serialize(&HandshakeMsg::SynAck)?;
                             client_socket.send_to(&reply, peer_addr).await?;
+
+                            sent_syn_ack = true;
+                            if received_syn_ack && sent_syn_ack {
+                                // Transition to Connected state
+                                state.write().await.set_status(
+                                    Status::Connected,
+                                    Some(format!("Connected to {}", sender)),
+                                    None
+                                );
+                                return Ok(());
+                            }
+
                         }
                         HandshakeMsg::SynAck => {
-                            info!("Received SYN-ACK from {}! Connection Established.", sender);
+                            info!("Received SYN-ACK from {}. Sending ACK.", sender);
 
                             // Transition to Connected state
                             state.write().await.set_status(
-                                Status::Connected,
-                                Some(format!("Connected to {}", sender)),
-                                None
+                                Status::Punching,
+                                Some(format!("Received SYN-ACK from {}. Sending ACK.", sender)),
+                                Some(secs_left),
                             );
-                            return Ok(());
+
+                            received_syn_ack = true;
+                            if received_syn_ack && sent_syn_ack {
+                                // Transition to Connected state
+                                state.write().await.set_status(
+                                    Status::Connected,
+                                    Some(format!("Connected to {}", sender)),
+                                    None
+                                );
+                                return Ok(());
+                            }
                         }
                         HandshakeMsg::Bye => {
                             warn!("Peer {} rejected connection (received BYE)", sender);
@@ -185,14 +212,24 @@ mod tests {
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
 
-            // Wait for Peer A to send SYN
-            let (len, _) = socket_b.recv_from(&mut buf).await.unwrap();
-            let msg: HandshakeMsg = bincode::deserialize(&buf[..len]).unwrap();
-            assert_eq!(msg, HandshakeMsg::Syn);
+            // 1. Send SYN to A so A can fulfill `sent_syn_ack` requirement
+            let syn_msg = bincode::serialize(&HandshakeMsg::Syn).unwrap();
+            socket_b.send_to(&syn_msg, addr_a).await.unwrap();
 
-            // Send SYN-ACK back
-            let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
-            socket_b.send_to(&reply, addr_a).await.unwrap();
+            // 2. Respond to A's SYN
+            loop {
+                let (len, sender) = socket_b.recv_from(&mut buf).await.unwrap();
+                if sender == addr_a {
+                    if let Ok(msg) = bincode::deserialize::<HandshakeMsg>(&buf[..len]) {
+                        if msg == HandshakeMsg::Syn {
+                            // Send SYN-ACK back so A can fulfill `received_syn_ack`
+                            let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
+                            socket_b.send_to(&reply, addr_a).await.unwrap();
+                            break;
+                        }
+                    }
+                }
+            }
         });
 
         let result = handshake(socket_a, addr_b, state_a.clone(), 5).await;
@@ -232,6 +269,12 @@ mod tests {
 
             // 2. Real peer replies later
             tokio::time::sleep(Duration::from_millis(1000)).await;
+
+            // Peer sends SYN
+            let syn = bincode::serialize(&HandshakeMsg::Syn).unwrap();
+            socket_b.send_to(&syn, addr_a).await.unwrap();
+
+            // Peer sends SYN-ACK
             let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
             socket_b.send_to(&reply, addr_a).await.unwrap();
         });
@@ -269,21 +312,30 @@ mod tests {
         let socket_a = bind_local().await;
         let socket_b = bind_local().await;
         let state_a = create_dummy_state();
+        let _state_b = create_dummy_state();
 
         let addr_a = socket_a.local_addr().unwrap();
         let addr_b = socket_b.local_addr().unwrap();
 
-        // Peer B logic
+        // Peer B logic - simulates another peer also initiating handshake
         let socket_b_clone = socket_b.clone();
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
-            let (len, sender) = socket_b_clone.recv_from(&mut buf).await.unwrap();
 
-            if sender == addr_a {
-                // If we get a SYN, we also reply SYN-ACK (Standard TCP-like hole punching)
-                if let Ok(HandshakeMsg::Syn) = bincode::deserialize(&buf[..len]) {
-                    let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
-                    socket_b_clone.send_to(&reply, addr_a).await.unwrap();
+            // 1. Send SYN to A proactively
+            let syn = bincode::serialize(&HandshakeMsg::Syn).unwrap();
+            socket_b_clone.send_to(&syn, addr_a).await.unwrap();
+
+            // 2. Receive SYN from A and Reply
+            loop {
+                let (len, sender) = socket_b_clone.recv_from(&mut buf).await.unwrap();
+                if sender == addr_a {
+                    if let Ok(HandshakeMsg::Syn) = bincode::deserialize(&buf[..len]) {
+                        // Send SYN-ACK back
+                        let reply = bincode::serialize(&HandshakeMsg::SynAck).unwrap();
+                        socket_b_clone.send_to(&reply, addr_a).await.unwrap();
+                        break;
+                    }
                 }
             }
         });
@@ -291,5 +343,40 @@ mod tests {
         let result = handshake(socket_a, addr_b, state_a.clone(), 5).await;
         assert!(result.is_ok());
         assert_eq!(state_a.read().await.status, Status::Connected);
+    }
+
+    /// Test that both peers complete handshake when initiating simultaneously
+    /// Verifies the fix for the issue where user B would mark as connected
+    /// and ignore further SYN packets from user A
+    #[tokio::test]
+    async fn test_both_peers_complete_handshake_when_initiating_simultaneously() {
+        let socket_a = bind_local().await;
+        let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
+        let state_b = create_dummy_state();
+
+        let addr_a = socket_a.local_addr().unwrap();
+        let addr_b = socket_b.local_addr().unwrap();
+
+        // Both peers start handshake simultaneously
+        let socket_a_clone = socket_a.clone();
+        let state_a_clone = state_a.clone();
+        let handle_a =
+            tokio::spawn(async move { handshake(socket_a_clone, addr_b, state_a_clone, 5).await });
+
+        let socket_b_clone = socket_b.clone();
+        let state_b_clone = state_b.clone();
+        let handle_b =
+            tokio::spawn(async move { handshake(socket_b_clone, addr_a, state_b_clone, 5).await });
+
+        // Both should complete successfully
+        let result_a = handle_a.await.unwrap();
+        let result_b = handle_b.await.unwrap();
+
+        assert!(result_a.is_ok(), "Peer A should complete handshake");
+        assert!(result_b.is_ok(), "Peer B should complete handshake");
+
+        assert_eq!(state_a.read().await.status, Status::Connected);
+        assert_eq!(state_b.read().await.status, Status::Connected);
     }
 }
