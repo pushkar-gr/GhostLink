@@ -54,6 +54,7 @@ pub fn router(shared_state: SharedState) -> Router {
         // API Routes
         .route("/api/state", get(get_ip))
         .route("/api/connect", post(connect_peer))
+        .route("/api/message", post(send_message))
         .route("/api/events", get(sse_handler))
         // Static File Serving (Fallback)
         .fallback_service(ServeDir::new("static").append_index_html_on_directories(true))
@@ -113,6 +114,38 @@ async fn connect_peer(
     let cmd_tx = state.read().await.cmd_tx().clone();
     if let Err(e) = cmd_tx.send(Command::ConnectPeer).await {
         error!("Failed to send ConnectPeer command: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Controller Error".to_string(),
+        ));
+    }
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Debug, Deserialize)]
+struct SendMessageRequest {
+    message: String,
+}
+
+/// Handler for `POST /api/message`.
+async fn send_message(
+    State(state): State<SharedState>,
+    Json(input): Json<SendMessageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    if input.message.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Message cannot be empty".into()));
+    }
+
+    // Check if connected
+    if state.read().await.status != Status::Connected {
+        return Err((StatusCode::BAD_REQUEST, "Not connected to a peer".into()));
+    }
+
+    // Send command to controller
+    let cmd_tx = state.read().await.cmd_tx().clone();
+    if let Err(e) = cmd_tx.send(Command::SendMessage(input.message)).await {
+        error!("Failed to send Message command: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal Controller Error".to_string(),

@@ -117,10 +117,7 @@ async fn start_controller(
         }
     };
 
-    let message_manager = Arc::new(RwLock::new(MessageManager::new(
-        Arc::clone(&socket),
-        Arc::clone(shared_state),
-    )));
+    let mut message_manager = MessageManager::new(Arc::clone(&socket), Arc::clone(shared_state));
 
     // 4. Command Loop with Heartbeat
     info!("Waiting for commands (NAT Keep-Alive active)...");
@@ -128,6 +125,8 @@ async fn start_controller(
     let mut keep_alive_interval =
         tokio::time::interval(Duration::from_secs(config.punch_hole_secs));
     keep_alive_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    let mut recv_buf = [0u8; 4096];
 
     loop {
         tokio::select! {
@@ -145,14 +144,27 @@ async fn start_controller(
                                 if let Some(peer_addr) = peer_ip_opt {
                                     debug!("Initiating connection to peer: {}", peer_addr);
 
-                                    if let Err(e) = Arc::clone(&message_manager).write().await.handshake(peer_addr, config.handshake_timeout_secs).await {
+                                    if let Err(e) = message_manager.handshake(peer_addr, config.handshake_timeout_secs).await {
                                         error!("Connection attempt failed: {:?}", e);
                                     } else {
                                         debug!("Connection established successfully. MessageManager active.");
-                                        Arc::clone(&message_manager).write().await.upgrade_to_kcp().await?;
+                                        message_manager.upgrade_to_kcp().await?;
                                     }
                                 } else {
                                     warn!("Connect command received but no peer IP is set in state.");
+                                }
+                            }
+
+                            Command::SendMessage(msg) => {
+                                if message_manager.is_connected() {
+                                    match message_manager.send_message(msg.as_bytes()).await {
+                                        Ok(_) => {
+                                            shared_state.read().await.add_message(msg, true);
+                                        },
+                                        Err(e) => error!("Failed to send KCP message: {}", e),
+                                    }
+                                } else {
+                                    warn!("Cannot send message: Not connected.");
                                 }
                             }
                         }
@@ -163,15 +175,31 @@ async fn start_controller(
                     }
                 }
             }
-            // B. Handle Keep-Alive (Heartbeat)
+
+
+            // B. Handle Incoming KCP Messages (Only if connected)
+            res = message_manager.receive_message(&mut recv_buf), if message_manager.is_connected() => {
+                match res {
+                    Ok(n) => {
+                        let msg_str = String::from_utf8_lossy(&recv_buf[..n]).to_string();
+                        info!("Received message: {}", msg_str);
+                        shared_state.read().await.add_message(msg_str, false);
+                    },
+                    Err(e) => {
+                        error!("Error reading from KCP stream: {}", e);
+                    }
+                }
+            }
+
+            // C. Handle Keep-Alive (Heartbeat)
             _ = keep_alive_interval.tick() => {
-                // We only need to keep the NAT open if we are NOT connected.
+                // Only need to keep the NAT open if we are NOT connected.
                 // If we are connected, the MessageManager (chat session) handles traffic.
                 let status = shared_state.read().await.status;
 
                 if status == Status::Disconnected {
                     debug!("Sending Keep-Alive packet to STUN server...");
-                    // Re-resolving IP sends a STUN packet, which refreshes the NAT mapping.
+                    // Re resolving IP sends a STUN packet, which refreshes the NAT mapping.
                     match net::resolve_public_ip(&socket, &config.stun_server).await {
                         Ok(addr) => {
                             let mut state = shared_state.write().await;

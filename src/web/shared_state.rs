@@ -92,7 +92,7 @@ impl AppState {
         timeout: Option<u64>,
     ) {
         self.public_ip = Some(addr);
-        self.broadcast_event(message, timeout);
+        self.broadcast_status_change(message, timeout);
     }
 
     /// Updates the NAT type and notifies listeners.
@@ -104,28 +104,26 @@ impl AppState {
         timeout: Option<u64>,
     ) {
         self.nat_type = nat_type;
-        self.broadcast_event(message, timeout);
+        self.broadcast_status_change(message, timeout);
     }
 
     /// Updates the connection status and notifies listeners.
     pub fn set_status(&mut self, status: Status, message: Option<String>, timeout: Option<u64>) {
         self.status = status;
-        self.broadcast_event(message, timeout);
+        self.broadcast_status_change(message, timeout);
     }
 
     /// Updates the peer's IP address and notifies listeners.
     pub fn set_peer_ip(&mut self, addr: SocketAddr, message: Option<String>, timeout: Option<u64>) {
         self.peer_ip = Some(addr);
-        self.broadcast_event(message, timeout);
+        self.broadcast_status_change(message, timeout);
     }
 
     /// Broadcasts the current state to all active listeners (e.g., Web UI).
     ///
     /// This constructs an `AppEvent` based on the current `status` and sends it
     /// via the `event_tx` channel.
-    ///
-    /// Note: If no receivers are active (e.g., no browser connected), the error is ignored.
-    fn broadcast_event(&self, message: Option<String>, timeout: Option<u64>) {
+    fn broadcast_status_change(&self, message: Option<String>, timeout: Option<u64>) {
         let event = match self.status {
             // When disconnected, we send the full state so the UI can sync up.
             Status::Disconnected => AppEvent::Disconnected {
@@ -136,9 +134,16 @@ impl AppState {
             // When connected, we send status messages.
             Status::Connected => AppEvent::Connected { message },
         };
+        self.broadcast_event(event);
+    }
 
-        // We ignore the error here because it's valid for there to be no active
-        // subscribers (e.g., the user hasn't opened the web page yet).
+    /// Explicitly broadcasts a new chat message to the UI.
+    pub fn add_message(&self, content: String, from_me: bool) {
+        let _ = self.event_tx.send(AppEvent::Message { content, from_me });
+    }
+
+    /// General helper for other updates if needed
+    fn broadcast_event(&self, event: AppEvent) {
         let _ = self.event_tx.send(event);
     }
 }
@@ -168,7 +173,9 @@ pub enum AppEvent {
     /// The application is idle or disconnected.
     ///
     /// Payload includes the full `AppState` to ensure the UI is fully synchronized.
-    Disconnected { state: AppState },
+    Disconnected {
+        state: AppState,
+    },
 
     /// The application is actively trying to punch a hole through the NAT.
     Punching {
@@ -182,6 +189,11 @@ pub enum AppEvent {
     Connected {
         /// Informational message from the peer or system.
         message: Option<String>,
+    },
+
+    Message {
+        content: String,
+        from_me: bool,
     },
 }
 
@@ -204,4 +216,6 @@ pub enum Status {
 pub enum Command {
     /// Instructs the controller to initiate a connection attempt to the configured peer.
     ConnectPeer,
+
+    SendMessage(String),
 }
