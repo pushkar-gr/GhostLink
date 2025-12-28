@@ -5,7 +5,7 @@
 
 use super::web::shared_state::NatType;
 use anyhow::{Context, Result, bail};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use stun::{
     agent::TransactionId,
     message::{BINDING_REQUEST, Getter, Message},
@@ -19,6 +19,30 @@ use tracing::{debug, info};
 
 /// The duration to wait for a STUN response before timing out.
 const STUN_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Resolves the local IP address by connecting to a public DNS server.
+///
+/// This method uses a trick: connecting to a remote address (without actually sending data)
+/// causes the OS to select the appropriate local interface and IP address.
+///
+/// # Returns
+///
+/// * `Ok(SocketAddr)` - The local IP address and port.
+/// * `Err` - If the operation fails.
+pub async fn get_local_ip(local_port: u16) -> Result<SocketAddr> {
+    // Connect to Google's public DNS (we don't send any data)
+    let socket = UdpSocket::bind(("0.0.0.0", 0)).await?;
+    socket.connect("8.8.8.8:80").await?;
+    let local_addr = socket.local_addr()?;
+
+    // Replace the ephemeral port with the actual listening port
+    let local_ip = match local_addr.ip() {
+        IpAddr::V4(ip) => SocketAddr::new(IpAddr::V4(ip), local_port),
+        IpAddr::V6(ip) => SocketAddr::new(IpAddr::V6(ip), local_port),
+    };
+
+    Ok(local_ip)
+}
 
 /// Resolves the public IP and port of the local machine by querying a public STUN server.
 ///

@@ -86,6 +86,21 @@ async fn start_controller(
     let local_port = socket.local_addr()?.port();
     info!("UDP Socket bound locally to port: {}", local_port);
 
+    // 1.5. Resolve Local IP
+    match net::get_local_ip(local_port).await {
+        Ok(local_addr) => {
+            info!("Local IP resolved: {}", local_addr);
+            shared_state.write().await.set_local_ip(
+                local_addr,
+                Some("Local IP resolved".into()),
+                None,
+            );
+        }
+        Err(e) => {
+            warn!("Failed to resolve local IP: {:?}", e);
+        }
+    }
+
     // 2. Resolve Public IP via STUN
     // Note: We pass a reference to the socket. net::resolve_public_ip now expects &UdpSocket.
     match net::resolve_public_ip(&socket, &config.stun_server).await {

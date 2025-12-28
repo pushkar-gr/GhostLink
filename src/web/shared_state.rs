@@ -23,6 +23,11 @@ pub type SharedState = Arc<RwLock<AppState>>;
 /// because they are runtime control channels, not persistent state data.
 #[derive(Debug, Serialize, Clone)]
 pub struct AppState {
+    /// The local IP address and port bound by this node.
+    ///
+    /// This is useful for LAN connections where users are on the same network.
+    pub local_ip: Option<SocketAddr>,
+
     /// The public IP address and port of this node, as seen by the STUN server.
     ///
     /// This is `None` initially and is populated once STUN resolution succeeds.
@@ -62,6 +67,7 @@ impl AppState {
     /// * `event_tx` - Channel for broadcasting events to the UI.
     pub fn new(cmd_tx: mpsc::Sender<Command>, event_tx: broadcast::Sender<AppEvent>) -> Self {
         Self {
+            local_ip: None,
             public_ip: None,
             nat_type: NatType::default(),
             status: Status::default(),
@@ -83,6 +89,17 @@ impl AppState {
 
     // -- State Mutators --
     // These methods update the state and automatically broadcast the change to the UI.
+
+    /// Updates the local IP address and notifies listeners.
+    pub fn set_local_ip(
+        &mut self,
+        addr: SocketAddr,
+        message: Option<String>,
+        timeout: Option<u64>,
+    ) {
+        self.local_ip = Some(addr);
+        self.broadcast_status_change(message, timeout);
+    }
 
     /// Updates the public IP address and notifies listeners.
     pub fn set_public_ip(
