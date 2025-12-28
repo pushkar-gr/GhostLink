@@ -119,27 +119,39 @@
             </div>
         </div>
 
-        <!-- CONNECTED VIEW -->
+        <!-- CONNECTED VIEW / CHAT -->
         <div id="view-connected" class="view-section">
-            <div class="card success-card">
-                <div class="success-icon">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            <div class="chat-container">
+                <div class="chat-header">
+                    <div class="chat-peer-info">
+                        <div class="peer-avatar">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                        </div>
+                        <div class="peer-details">
+                            <div class="peer-name">Connected Peer</div>
+                            <div class="peer-address" id="chatPeerIp">...</div>
+                        </div>
+                    </div>
                 </div>
-                <h2>Connection Established</h2>
-                <p>Direct P2P tunnel is active.</p>
                 
-                <div class="connection-details">
-                    <div class="detail-row">
-                        <span>Local Endpoint:</span>
-                        <span class="mono" id="connLocalIp">...</span>
-                    </div>
-                    <div class="detail-row">
-                        <span>Remote Peer:</span>
-                        <span class="mono" id="connRemoteIp">...</span>
+                <div class="chat-messages" id="chatMessages">
+                    <div class="chat-welcome">
+                        <div class="welcome-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                        </div>
+                        <h3>Connection Established</h3>
+                        <p>You can now send and receive messages securely via P2P</p>
                     </div>
                 </div>
-
-                <button id="disconnectBtn" class="btn-primary" style="background-color: var(--card-bg); border: 1px solid rgba(255,255,255,0.1); margin-top: 1.5rem;">Disconnect</button>
+                
+                <div class="chat-input-container">
+                    <form id="chatForm" class="chat-input-form">
+                        <input type="text" id="chatInput" placeholder="Type a message..." autocomplete="off">
+                        <button type="submit" id="sendBtn" class="send-btn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
 

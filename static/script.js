@@ -43,10 +43,12 @@ const els = {
     punchLogs: document.getElementById('punchLogs'),
     punchTimeout: document.getElementById('punchTimeout'),
 
-    // Connected
-    connLocalIp: document.getElementById('connLocalIp'),
-    connRemoteIp: document.getElementById('connRemoteIp'),
-    disconnectBtn: document.getElementById('disconnectBtn'),
+    // Connected / Chat
+    chatMessages: document.getElementById('chatMessages'),
+    chatPeerIp: document.getElementById('chatPeerIp'),
+    chatForm: document.getElementById('chatForm'),
+    chatInput: document.getElementById('chatInput'),
+    sendBtn: document.getElementById('sendBtn'),
 
     // Toast
     toast: document.getElementById('toast'),
@@ -205,8 +207,8 @@ async function enterPunchingState(data) {
 async function enterConnectedState(data) {
     els.viewConnected.classList.add('active');
 
-    els.connLocalIp.innerText = state.fullAddress;
-    els.connRemoteIp.innerText = state.peerAddress || "Connected Peer";
+    // Update chat header with peer info
+    els.chatPeerIp.innerText = state.peerAddress || "Connected Peer";
 
     if (data.message) {
         console.log("Connected:", data.message);
@@ -230,9 +232,15 @@ function connectSSE() {
             // { status: "DISCONNECTED", state: { ... } }
             // { status: "PUNCHING", timeout: 10, message: "..." }
             // { status: "CONNECTED", message: "..." }
+            // { status: "MESSAGE", content: "...", from_me: true/false }
 
             if (data.status) {
-                handleStatusChange(data.status, data);
+                if (data.status === 'MESSAGE') {
+                    // Handle chat message
+                    addChatMessage(data.content, data.from_me);
+                } else {
+                    handleStatusChange(data.status, data);
+                }
             }
         } catch (e) {
             console.error("SSE Parse Error", e);
@@ -318,6 +326,80 @@ function addLog(message) {
     els.punchLogs.scrollTop = els.punchLogs.scrollHeight;
 }
 
+// --- Chat Functions ---
+
+/**
+ * Adds a chat message to the chat UI
+ * @param {string} content - Message content
+ * @param {boolean} fromMe - True if message was sent by the user, false if received from peer
+ */
+function addChatMessage(content, fromMe) {
+    // Remove welcome message if it exists
+    const welcome = els.chatMessages.querySelector('.chat-welcome');
+    if (welcome) {
+        welcome.remove();
+    }
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${fromMe ? 'from-me' : 'from-peer'}`;
+    
+    const bubbleDiv = document.createElement('div');
+    bubbleDiv.className = 'message-bubble';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = content;
+    
+    const timeDiv = document.createElement('span');
+    timeDiv.className = 'message-time';
+    const now = new Date();
+    timeDiv.textContent = now.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit', hour12: true});
+    
+    bubbleDiv.appendChild(contentDiv);
+    bubbleDiv.appendChild(timeDiv);
+    messageDiv.appendChild(bubbleDiv);
+    
+    els.chatMessages.appendChild(messageDiv);
+    
+    // Auto-scroll to bottom
+    els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+}
+
+/**
+ * Handles chat form submission
+ */
+async function handleChatSubmit(e) {
+    e.preventDefault();
+    
+    const message = els.chatInput.value.trim();
+    if (!message) return;
+    
+    // Disable send button temporarily
+    els.sendBtn.disabled = true;
+    
+    try {
+        const res = await fetch('/api/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message })
+        });
+        
+        if (!res.ok) {
+            throw new Error('Failed to send message');
+        }
+        
+        // Clear input and refocus
+        els.chatInput.value = '';
+        els.chatInput.focus();
+        
+    } catch (err) {
+        console.error('Failed to send message:', err);
+        showToast('Failed to send message');
+    } finally {
+        els.sendBtn.disabled = false;
+    }
+}
+
 // --- Interactions ---
 
 async function handleConnect(e) {
@@ -348,15 +430,6 @@ async function handleConnect(e) {
     } finally {
         btn.innerText = "Establish Link";
         btn.disabled = false;
-    }
-}
-
-async function handleDisconnect() {
-    try {
-        await fetch('/api/disconnect', { method: 'POST' });
-        // UI updates via SSE Disconnected event
-    } catch(e) {
-        console.error(e);
     }
 }
 
@@ -482,10 +555,10 @@ function setupEventListeners() {
     if(els.copyBtn) els.copyBtn.addEventListener('click', copyToClipboard);
     if(els.copyLocalBtn) els.copyLocalBtn.addEventListener('click', copyLocalToClipboard);
     els.connectForm.addEventListener('submit', handleConnect);
-    els.disconnectBtn.addEventListener('click', handleDisconnect);
     els.peerIpInput.addEventListener('input', () => handleIpValidation('input'));
     els.peerIpInput.addEventListener('blur', () => handleIpValidation('blur'));
     els.peerPortInput.addEventListener('input', handlePortValidation);
+    if(els.chatForm) els.chatForm.addEventListener('submit', handleChatSubmit);
 }
 
 init();
