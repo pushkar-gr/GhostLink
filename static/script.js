@@ -30,7 +30,6 @@ const els = {
     apiErrorMsg: document.getElementById('apiErrorMsg'),
     copyBtn: document.getElementById('copyBtn'),
     copyLocalBtn: document.getElementById('copyLocalBtn'),
-    refreshBtn: document.getElementById('refreshBtn'),
     connectForm: document.getElementById('connectForm'),
     peerIpInput: document.getElementById('peerIp'),
     peerPortInput: document.getElementById('peerPort'),
@@ -74,10 +73,6 @@ async function init() {
  * Replaces old /api/ip, /api/status, and /api/peer calls.
  */
 async function fetchState() {
-    if (els.refreshBtn) {
-        els.refreshBtn.classList.add('spin');
-        els.refreshBtn.disabled = true;
-    }
     els.myIpDisplay.style.opacity = '0.5';
 
     try {
@@ -103,10 +98,6 @@ async function fetchState() {
         renderMyInfo(false);
     } finally {
         setTimeout(() => {
-            if (els.refreshBtn) {
-                els.refreshBtn.classList.remove('spin');
-                els.refreshBtn.disabled = false;
-            }
             els.myIpDisplay.style.opacity = '1';
         }, 500);
     }
@@ -415,8 +406,36 @@ const validators = {
     port: (p) => { const n = parseInt(p, 10); return !isNaN(n) && n > 0 && n <= 65535; }
 };
 
+/**
+ * Parses IP:Port format and populates both fields if detected.
+ * Returns true if parsing happened, false otherwise.
+ */
+function parseIpPort(inputValue) {
+    const match = inputValue.match(/^([0-9.]+):(\d+)$/);
+    if (match) {
+        const [, ip, port] = match;
+        if (validators.ip(ip) && validators.port(port)) {
+            els.peerIpInput.value = ip;
+            els.peerPortInput.value = port;
+            return true;
+        }
+    }
+    return false;
+}
+
 function handleIpValidation(eventType) {
     const val = els.peerIpInput.value.trim();
+    
+    // Try to parse IP:Port format on paste
+    if (eventType === 'input' && val.includes(':')) {
+        if (parseIpPort(val)) {
+            // Successfully parsed, validate both fields
+            handleIpValidation('input');
+            handlePortValidation();
+            return;
+        }
+    }
+    
     const isValid = validators.ip(val);
     state.isIpValid = isValid;
     if (isValid) {
@@ -460,8 +479,6 @@ function handlePortValidation() {
 function setupEventListeners() {
     if(els.copyBtn) els.copyBtn.addEventListener('click', copyToClipboard);
     if(els.copyLocalBtn) els.copyLocalBtn.addEventListener('click', copyLocalToClipboard);
-    // Updated listener: "Refresh" now calls the unified fetchState
-    if(els.refreshBtn) els.refreshBtn.addEventListener('click', fetchState);
     els.connectForm.addEventListener('submit', handleConnect);
     els.disconnectBtn.addEventListener('click', handleDisconnect);
     els.peerIpInput.addEventListener('input', () => handleIpValidation('input'));
