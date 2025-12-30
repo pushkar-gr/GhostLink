@@ -1,632 +1,248 @@
-// --- State Management ---
 const state = {
     fullAddress: null,
     localAddress: null,
     peerAddress: null,
-    natType: 'Unknown',
-    connectionStatus: 'disconnected', // disconnected, punching, connected
+    natType: 'SCANNING',
+    connectionStatus: 'disconnected',
     isIpValid: false,
     isPortValid: false,
     sseSource: null,
+    punchInterval: null
 };
 
-// --- DOM Elements ---
 const els = {
-    // Views
     viewHome: document.getElementById('view-home'),
     viewPunching: document.getElementById('view-punching'),
     viewConnected: document.getElementById('view-connected'),
-
-    // Shared
     statusText: document.getElementById('statusText'),
-    statusBadge: document.getElementById('statusBadge'),
-    statusDot: document.querySelector('#statusBadge .status-dot'),
-
-    // Home
-    myIpDisplay: document.getElementById('myIpDisplay'),
-    myLocalIpDisplay: document.getElementById('myLocalIpDisplay'),
-    natTypeDisplay: document.getElementById('natTypeDisplay'), // New NAT Element
-    apiErrorMsg: document.getElementById('apiErrorMsg'),
-    copyBtn: document.getElementById('copyBtn'),
-    copyLocalBtn: document.getElementById('copyLocalBtn'),
-    connectForm: document.getElementById('connectForm'),
+    statusDot: document.querySelector('.status-dot'),
+    myIp: document.getElementById('myIpDisplay'),
+    myLocalIp: document.getElementById('myLocalIpDisplay'),
+    natType: document.getElementById('natTypeDisplay'),
     peerIpInput: document.getElementById('peerIp'),
     peerPortInput: document.getElementById('peerPort'),
-    ipError: document.getElementById('ipError'),
-    portError: document.getElementById('portError'),
+    connectForm: document.getElementById('connectForm'),
     submitBtn: document.querySelector('#connectForm button'),
-
-    // Punching / Visualization
-    vizClientIp: document.getElementById('vizClientIp'),
-    vizPeerIp: document.getElementById('vizPeerIp'),
+    punchTimer: document.getElementById('punchTimerDisplay'),
     punchLogs: document.getElementById('punchLogs'),
-    punchTimeout: document.getElementById('punchTimeout'),
-    cancelPunchBtn: document.getElementById('cancelPunchBtn'), // New Cancel Button
-
-    // Connected / Chat
+    cancelBtn: document.getElementById('cancelPunchBtn'),
     chatMessages: document.getElementById('chatMessages'),
     chatPeerIp: document.getElementById('chatPeerIp'),
     chatForm: document.getElementById('chatForm'),
     chatInput: document.getElementById('chatInput'),
-    sendBtn: document.getElementById('sendBtn'),
-    disconnectBtn: document.getElementById('disconnectBtn'), // New Disconnect Button
-
-    // Toast
+    disconnectBtn: document.getElementById('disconnectBtn'),
     toast: document.getElementById('toast'),
-    toastMsg: document.querySelector('#toast .toast-msg'),
+    ipError: document.getElementById('ipError'),
+    portError: document.getElementById('portError')
 };
 
-// --- Initialization ---
 async function init() {
-    toggleSubmitButton();
-    
-    // Initial fetch of the complete application state
+    validateForm();
     await fetchState();
-    
-    // Connect to SSE for real-time updates
     connectSSE();
-
-    setupEventListeners();
+    setupEvents();
 }
 
-// --- State Logic ---
-
-/**
- * Fetches the complete state from the backend via the new /api/state endpoint.
- * Replaces old /api/ip, /api/status, and /api/peer calls.
- */
 async function fetchState() {
-    els.myIpDisplay.style.opacity = '0.5';
-
     try {
         const res = await fetch('/api/state');
-        if (!res.ok) throw new Error(`Server error`);
-        
-        const jsonResponse = await res.json();
-        
-        // The server returns: { "state": { public_ip: "...", ... } }
-        // We must unwrap the "state" key.
-        const appState = jsonResponse.state;
-        
-        if (appState) {
-            syncState(appState);
-            renderMyInfo(true);
-        } else {
-            console.warn("Invalid state structure received", jsonResponse);
-            renderMyInfo(false);
-        }
-
-    } catch (err) {
-        console.warn("State fetch failed", err);
-        renderMyInfo(false);
-    } finally {
-        setTimeout(() => {
-            els.myIpDisplay.style.opacity = '1';
-        }, 500);
+        if (!res.ok) throw new Error();
+        const json = await res.json();
+        if (json.state) syncState(json.state);
+    } catch (e) {
+        showToast("SYSTEM_ERR: STATE_FETCH_FAIL");
     }
 }
 
-/**
- * Centralizes logic for updating the frontend state from a backend AppState object.
- * Can be called from the REST API fetch or from an SSE Disconnected event.
- */
 function syncState(data) {
-    if (!data) return;
-
-    // 1. Public IP
-    if (data.public_ip) state.fullAddress = data.public_ip;
-    
-    // 2. Local IP
-    if (data.local_ip) state.localAddress = data.local_ip;
-    
-    // 3. Peer IP
-    if (data.peer_ip) state.peerAddress = data.peer_ip;
-    else if (data.peer_ip === null) state.peerAddress = null; // Explicit reset
-
-    // 4. NAT Type (New)
+    if (data.public_ip) {
+        state.fullAddress = data.public_ip;
+        els.myIp.textContent = data.public_ip;
+    }
+    if (data.local_ip) {
+        state.localAddress = data.local_ip;
+        els.myLocalIp.textContent = data.local_ip;
+    }
     if (data.nat_type) {
         state.natType = data.nat_type;
-        renderNatType();
+        els.natType.textContent = data.nat_type.toUpperCase();
     }
-
-    // 5. Status
-    if (data.status) {
-        // reuse handleStatusChange to trigger UI transitions if needed,
-        // but strictly speaking, fetchState is usually for init/refresh.
-        // We pass the whole data object so handleStatusChange can see the fields.
-        handleStatusChange(data.status, data);
-    }
+    if (data.status) handleStatusChange(data.status, data);
 }
 
 function handleStatusChange(statusStr, data = {}) {
-    const normStatus = (statusStr || 'DISCONNECTED').toUpperCase();
-    
-    // Handle Data Syncing based on Event Structure vs API Structure
-    
-    // CASE A: Disconnected Event via SSE (AppEvent::Disconnected { state })
-    if (normStatus === 'DISCONNECTED' && data.state) {
-        syncState(data.state);
-        // Update UI to reflect any changes in public/local IP
-        renderMyInfo(true);
-    }
-    // CASE B: Standard AppState via REST API (/api/state) or top-level event fields
-    // (Note: syncState calls handleStatusChange, so we avoid infinite recursion by not calling syncState back)
-    
-    // Logic: Handling Disconnection Messages
-    // Simplified: Directly display message if present in the event payload
-    if (normStatus === 'DISCONNECTED') {
-        if (data.message) {
-            showToast(data.message);
-        }
-    }
+    const status = (statusStr || 'DISCONNECTED').toUpperCase();
+    state.connectionStatus = status.toLowerCase();
 
-    state.connectionStatus = normStatus.toLowerCase();
-    
-    // 1. Update Badge
-    renderStatusBadge();
+    clearInterval(state.punchInterval);
 
-    // 2. Switch Views
     els.viewHome.classList.remove('active');
     els.viewPunching.classList.remove('active');
     els.viewConnected.classList.remove('active');
 
-    // Reset buttons when state changes
-    resetDisconnectButtons();
+    els.statusText.textContent = status;
 
-    if (normStatus === 'PUNCHING') {
-        enterPunchingState(data);
-    } else if (normStatus === 'CONNECTED') {
-        enterConnectedState(data);
+    els.cancelBtn.disabled = false;
+    els.cancelBtn.textContent = "ABORT SEQUENCE";
+
+    if (status === 'PUNCHING') {
+        els.viewPunching.classList.add('active');
+        els.statusDot.style.background = 'var(--warning)';
+        els.statusDot.style.boxShadow = '0 0 10px var(--warning)';
+        startMatchmakingTimer(data.timeout || 60);
+        if(data.message) addLog(data.message);
+    } else if (status === 'CONNECTED') {
+        els.viewConnected.classList.add('active');
+        els.statusDot.style.background = 'var(--success)';
+        els.statusDot.style.boxShadow = '0 0 10px var(--success)';
+        els.chatPeerIp.textContent = state.peerAddress || "UNKNOWN";
+        if(data.message) addChatMessage("SYSTEM", data.message);
     } else {
-        // DISCONNECTED
         els.viewHome.classList.add('active');
+        els.statusDot.style.background = 'var(--danger)';
+        els.statusDot.style.boxShadow = '0 0 10px var(--danger)';
+        
         els.submitBtn.disabled = !(state.isIpValid && state.isPortValid);
-        els.submitBtn.innerText = "Establish Link";
+        els.submitBtn.textContent = "INITIATE LINK SEQUENCE";
+        
+        if (data.message) showToast(data.message);
     }
 }
 
-function resetDisconnectButtons() {
-    if(els.disconnectBtn) els.disconnectBtn.disabled = false;
-    if(els.cancelPunchBtn) {
-        els.cancelPunchBtn.disabled = false;
-        els.cancelPunchBtn.innerText = "Cancel Connection";
-    }
+function startMatchmakingTimer(seconds) {
+    let left = seconds;
+    updateTimerDisplay(left);
+    state.punchInterval = setInterval(() => {
+        left--;
+        updateTimerDisplay(left);
+        if (left <= 0) clearInterval(state.punchInterval);
+    }, 1000);
 }
 
-async function enterPunchingState(data) {
-    els.viewPunching.classList.add('active');
-    
-    // If peer info is missing locally, we rely on fetchState or what we have.
-    // Since /api/peer is gone, we don't fetch it explicitly anymore.
-    // It should have been synced via fetchState() or previous input.
-    
-    els.vizClientIp.innerText = state.fullAddress || "Unknown";
-    els.vizPeerIp.innerText = state.peerAddress || "Target";
-
-    // Handle Timeout Display (from AppEvent::Punching { timeout })
-    if (data.timeout !== undefined && data.timeout !== null) {
-        els.punchTimeout.innerText = `${data.timeout}s`;
-    }
-
-    // Handle Logs (from AppEvent::Punching { message })
-    if (data.message) {
-        addLog(data.message);
-    }
+function updateTimerDisplay(seconds) {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    els.punchTimer.textContent = `${m}:${s}`;
 }
 
-async function enterConnectedState(data) {
-    els.viewConnected.classList.add('active');
-
-    // Update chat header with peer info
-    els.chatPeerIp.innerText = state.peerAddress || "Connected Peer";
-
-    if (data.message) {
-        console.log("Connected:", data.message);
-    }
-}
-
-// --- SSE (Real-time Events) ---
 function connectSSE() {
-    if (state.sseSource && state.sseSource.readyState !== EventSource.CLOSED) {
-        return; 
-    }
-
-    // Endpoint: /api/events
+    if (state.sseSource) return;
     state.sseSource = new EventSource('/api/events');
-
-    state.sseSource.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            
-            // AppEvent Structure: 
-            // { status: "DISCONNECTED", state: { ... } }
-            // { status: "PUNCHING", timeout: 10, message: "..." }
-            // { status: "CONNECTED", message: "..." }
-            // { status: "MESSAGE", content: "...", from_me: true/false }
-            // { status: "CLEAR_CHAT" }
-
-            if (data.status) {
-                if (data.status === 'MESSAGE') {
-                    // Handle chat message
-                    addChatMessage(data.content, data.from_me);
-                } else if (data.status === 'CLEAR_CHAT') {
-                    // Handle clear chat event
-                    clearChatUI();
-                } else {
-                    handleStatusChange(data.status, data);
-                }
-            }
-        } catch (e) {
-            console.error("SSE Parse Error", e);
+    state.sseSource.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.status === 'MESSAGE') {
+            addChatMessage(data.from_me ? "ME" : "PEER", data.content);
+        } else if (data.status) {
+            handleStatusChange(data.status, data);
         }
     };
-
-    state.sseSource.onerror = (err) => {
-        console.warn("SSE Connection issue", err);
-    };
 }
 
-// --- UI Rendering ---
-
-function renderNatType() {
-    if (!els.natTypeDisplay) return;
-    
-    const type = state.natType;
-    els.natTypeDisplay.innerText = type;
-    
-    // Remove old classes
-    els.natTypeDisplay.classList.remove('cone', 'symmetric');
-    
-    // Add specific color class
-    if (type.toLowerCase().includes('cone')) {
-        els.natTypeDisplay.classList.add('cone');
-    } else if (type.toLowerCase().includes('symmetric')) {
-        els.natTypeDisplay.classList.add('symmetric');
-    }
-}
-
-function renderStatusBadge() {
-    const s = state.connectionStatus;
-    els.statusText.innerText = s.charAt(0).toUpperCase() + s.slice(1);
-    
-    let color, bg, border;
-    if (s === 'connected') {
-        color = 'var(--success)'; bg = 'rgba(16, 185, 129, 0.1)'; border = 'rgba(16, 185, 129, 0.2)';
-    } else if (s === 'punching') {
-        color = '#f59e0b'; bg = 'rgba(245, 158, 11, 0.1)'; border = 'rgba(245, 158, 11, 0.2)';
-    } else {
-        color = 'var(--danger)'; bg = 'rgba(239, 68, 68, 0.1)'; border = 'rgba(239, 68, 68, 0.2)';
-    }
-
-    els.statusDot.style.backgroundColor = color;
-    els.statusDot.style.boxShadow = `0 0 8px ${color}`;
-    els.statusBadge.style.color = color;
-    els.statusBadge.style.background = bg;
-    els.statusBadge.style.borderColor = border;
-}
-
-function renderMyInfo(success) {
-    if (success && state.fullAddress) {
-        els.myIpDisplay.innerText = state.fullAddress;
-        els.myIpDisplay.classList.remove('error');
-        els.apiErrorMsg.style.display = 'none';
-        els.copyBtn.style.display = 'flex';
-    } else {
-        els.myIpDisplay.innerText = "Connection Failed";
-        els.myIpDisplay.classList.add('error');
-        els.apiErrorMsg.innerText = "Could not reach node.";
-        els.apiErrorMsg.style.display = 'block';
-        els.copyBtn.style.display = 'none';
-    }
-
-    // Render local IP
-    if (success && state.localAddress) {
-        els.myLocalIpDisplay.innerText = state.localAddress;
-        els.myLocalIpDisplay.classList.remove('error');
-        els.copyLocalBtn.style.display = 'flex';
-    } else {
-        els.myLocalIpDisplay.innerText = "Not Available";
-        els.myLocalIpDisplay.classList.add('error');
-        els.copyLocalBtn.style.display = 'none';
-    }
-}
-
-function addLog(message) {
-    const row = document.createElement('div');
-    row.className = `log-line system`; 
-    const timeStr = new Date().toLocaleTimeString('en-US', {hour12: false, hour:"2-digit", minute:"2-digit", second:"2-digit"});
-    row.innerHTML = `<span class="log-timestamp">[${timeStr}]</span> ${message}`;
-    els.punchLogs.appendChild(row);
+function addLog(msg) {
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.textContent = `> ${msg.toUpperCase()}`;
+    els.punchLogs.appendChild(line);
     els.punchLogs.scrollTop = els.punchLogs.scrollHeight;
 }
 
-// --- Chat Functions ---
-
-function clearChatUI() {
-    // Reset chat container to initial state with welcome message
-    els.chatMessages.innerHTML = `
-        <div class="chat-welcome">
-            <div class="welcome-icon">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-            </div>
-            <h3>Connection Established</h3>
-            <p>You can now send and receive messages securely via P2P</p>
-        </div>
-    `;
-}
-
-/**
- * Adds a chat message to the chat UI
- * @param {string} content - Message content
- * @param {boolean} fromMe - True if message was sent by the user, false if received from peer
- */
-function addChatMessage(content, fromMe) {
-    // Remove welcome message if it exists
-    const welcome = els.chatMessages.querySelector('.chat-welcome');
-    if (welcome) {
-        welcome.remove();
-    }
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${fromMe ? 'from-me' : 'from-peer'}`;
-    
-    const bubbleDiv = document.createElement('div');
-    bubbleDiv.className = 'message-bubble';
-    
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-    contentDiv.textContent = content;
-    
-    const timeDiv = document.createElement('span');
-    timeDiv.className = 'message-time';
-    const now = new Date();
-    timeDiv.textContent = now.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit', hour12: true});
-    
-    bubbleDiv.appendChild(contentDiv);
-    bubbleDiv.appendChild(timeDiv);
-    messageDiv.appendChild(bubbleDiv);
-    
-    els.chatMessages.appendChild(messageDiv);
-    
-    // Auto-scroll to bottom
+function addChatMessage(sender, msg) {
+    const row = document.createElement('div');
+    row.className = `msg-line ${sender === 'ME' ? 'me' : 'peer'}`;
+    row.innerHTML = `<span class="msg-prefix">[${sender}]</span> <span>${msg}</span>`;
+    els.chatMessages.appendChild(row);
     els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
 }
 
-/**
- * Handles chat form submission
- */
-async function handleChatSubmit(e) {
-    e.preventDefault();
+function validateForm() {
+    const ipVal = els.peerIpInput.value;
+    const portVal = parseInt(els.peerPortInput.value);
     
-    const message = els.chatInput.value.trim();
-    if (!message) return;
+    state.isIpValid = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(ipVal);
+    state.isPortValid = portVal > 0 && portVal < 65536;
+
+    els.ipError.style.display = state.isIpValid || ipVal === '' ? 'none' : 'block';
+    els.portError.style.display = state.isPortValid || isNaN(portVal) ? 'none' : 'block';
     
-    // Disable send button temporarily
-    els.sendBtn.disabled = true;
-    
-    try {
-        const res = await fetch('/api/message', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message })
-        });
-        
-        if (!res.ok) {
-            throw new Error('Failed to send message');
-        }
-        
-        // Clear input and refocus
-        els.chatInput.value = '';
-        els.chatInput.focus();
-        
-    } catch (err) {
-        console.error('Failed to send message:', err);
-        showToast('Failed to send message');
-    } finally {
-        els.sendBtn.disabled = false;
-    }
-}
-
-// --- Interactions ---
-
-async function handleConnect(e) {
-    e.preventDefault();
-    if (!state.isIpValid || !state.isPortValid) return;
-
-    const ip = els.peerIpInput.value.trim();
-    const port = parseInt(els.peerPortInput.value.trim(), 10);
-    state.peerAddress = `${ip}:${port}`;
-
-    const btn = els.submitBtn;
-    btn.innerText = "Initiating...";
-    btn.disabled = true;
-
-    try {
-        const res = await fetch('/api/connect', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip, port })
-        });
-        if (!res.ok) throw new Error();
-        
-        els.punchLogs.innerHTML = '';
-        // No longer using lastSavedMessage
-
-    } catch (err) {
-        showToast("Connection failed to start");
-        btn.innerText = "Establish Link";
-        btn.disabled = false;
-    } 
-}
-
-// --- Disconnect Logic ---
-
-async function handleDisconnect(e) {
-    if(e) e.preventDefault();
-    
-    // Provide immediate UI feedback to prevent double-clicks
-    if(els.disconnectBtn) els.disconnectBtn.disabled = true;
-    if(els.cancelPunchBtn) {
-        els.cancelPunchBtn.disabled = true;
-        els.cancelPunchBtn.innerText = "Canceling...";
-    }
-
-    try {
-        const res = await fetch('/api/disconnect', { method: 'POST' });
-        if (!res.ok) throw new Error("Disconnect failed");
-        
-        // Success: We do nothing here. The backend will process the request,
-        // send a command, update state, and the SSE stream will push 
-        // a "DISCONNECTED" event, which triggers `handleStatusChange` to switch the UI.
-        
-    } catch (err) {
-        console.error('Disconnect failed:', err);
-        showToast("Failed to disconnect");
-        
-        // Re-enable buttons on failure so user can try again
-        if(els.disconnectBtn) els.disconnectBtn.disabled = false;
-        if(els.cancelPunchBtn) {
-            els.cancelPunchBtn.disabled = false;
-            els.cancelPunchBtn.innerText = "Cancel Connection";
-        }
-    }
-}
-
-// --- Validation & Utilities ---
-function toggleSubmitButton() {
     els.submitBtn.disabled = !(state.isIpValid && state.isPortValid);
 }
 
-function showToast(message) {
-    els.toastMsg.textContent = message;
-    els.toast.classList.add('show');
-    setTimeout(() => els.toast.classList.remove('show'), 3000);
-}
+function setupEvents() {
+    els.peerIpInput.addEventListener('input', validateForm);
+    els.peerPortInput.addEventListener('input', validateForm);
 
-function copyToClipboard() {
-    if (state.fullAddress) {
-        const textarea = document.createElement('textarea');
-        textarea.value = state.fullAddress;
-        document.body.appendChild(textarea);
-        textarea.select();
+    document.getElementById('copyBtn').addEventListener('click', () => {
+        navigator.clipboard.writeText(state.fullAddress);
+        showToast("PUBLIC_IP_COPIED_TO_CLIPBOARD");
+    });
+
+    document.getElementById('copyLocalBtn').addEventListener('click', () => {
+        navigator.clipboard.writeText(state.localAddress);
+        showToast("LOCAL_IP_COPIED_TO_CLIPBOARD");
+    });
+
+    els.connectForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const ip = els.peerIpInput.value;
+        const port = parseInt(els.peerPortInput.value);
+        state.peerAddress = `${ip}:${port}`;
+        els.submitBtn.disabled = true;
+        els.submitBtn.textContent = "INITIALIZING SEQUENCE...";
+        els.punchLogs.innerHTML = '';
+        
         try {
-            document.execCommand('copy');
-            showToast("Public IP copied to clipboard");
-        } catch (err) {
-            console.error('Copy failed', err);
+            await fetch('/api/connect', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ ip, port })
+            });
+        } catch(err) {
+            showToast("INIT_FAILED");
+            els.submitBtn.disabled = false;
         }
-        document.body.removeChild(textarea);
-    }
-}
+    });
 
-function copyLocalToClipboard() {
-    if (state.localAddress) {
-        const textarea = document.createElement('textarea');
-        textarea.value = state.localAddress;
-        document.body.appendChild(textarea);
-        textarea.select();
+    els.cancelBtn.addEventListener('click', async (e) => {
+        e.preventDefault(); 
+        els.cancelBtn.disabled = true;
+        els.cancelBtn.textContent = "ABORTING...";
+        
         try {
-            document.execCommand('copy');
-            showToast("Local IP copied to clipboard");
+            await fetch('/api/disconnect', { method: 'POST' });
         } catch (err) {
-            console.error('Copy failed', err);
+            showToast("ABORT_FAILED");
+            els.cancelBtn.textContent = "ABORT SEQUENCE";
+            els.cancelBtn.disabled = false;
         }
-        document.body.removeChild(textarea);
-    }
+    });
+
+    els.disconnectBtn.addEventListener('click', async () => {
+        await fetch('/api/disconnect', { method: 'POST' });
+    });
+
+    els.chatForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = els.chatInput.value.trim();
+        if(!msg) return;
+        els.chatInput.value = '';
+        await fetch('/api/message', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: msg })
+        });
+    });
 }
 
-const validators = {
-    ip: (ip) => /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(ip),
-    port: (p) => { const n = parseInt(p, 10); return !isNaN(n) && n > 0 && n <= 65535; }
-};
-
-/**
- * Parses IP:Port format and populates both fields if detected.
- * Returns true if parsing happened, false otherwise.
- */
-function parseIpPort(inputValue) {
-    const match = inputValue.match(/^([0-9.]+):(\d+)$/);
-    if (match) {
-        const [, ip, port] = match;
-        if (validators.ip(ip) && validators.port(port)) {
-            els.peerIpInput.value = ip;
-            els.peerPortInput.value = port;
-            return true;
-        }
-    }
-    return false;
-}
-
-function handleIpValidation(eventType) {
-    const val = els.peerIpInput.value.trim();
+function showToast(msg) {
+    const t = els.toast;
+    t.querySelector('.toast-msg').textContent = msg;
+    t.classList.add('show');
     
-    // Try to parse IP:Port format on paste
-    if (eventType === 'input' && val.includes(':')) {
-        if (parseIpPort(val)) {
-            // Successfully parsed, validate both fields
-            handleIpValidation('input');
-            handlePortValidation();
-            return;
-        }
-    }
+    if (t.hideTimeout) clearTimeout(t.hideTimeout);
     
-    const isValid = validators.ip(val);
-    state.isIpValid = isValid;
-    if (isValid) {
-        els.peerIpInput.classList.remove('error', 'valid');
-        els.peerIpInput.classList.add('valid');
-        els.ipError.style.display = 'none';
-    } else {
-        els.peerIpInput.classList.remove('valid');
-        if (eventType === 'blur' && val.length > 0) {
-            els.peerIpInput.classList.add('error');
-            els.ipError.style.display = 'block';
-        } else {
-            els.peerIpInput.classList.remove('error');
-            els.ipError.style.display = 'none';
-        }
-    }
-    toggleSubmitButton();
-}
-
-function handlePortValidation() {
-    const val = els.peerPortInput.value.trim();
-    const isValid = validators.port(val);
-    state.isPortValid = isValid;
-    if (isValid) {
-        els.peerPortInput.classList.remove('error', 'valid');
-        els.peerPortInput.classList.add('valid');
-        els.portError.style.display = 'none';
-    } else {
-        els.peerPortInput.classList.remove('valid');
-        if (val.length > 0) {
-            els.peerPortInput.classList.add('error');
-            els.portError.style.display = 'block';
-        } else {
-            els.peerPortInput.classList.remove('error');
-            els.portError.style.display = 'none';
-        }
-    }
-    toggleSubmitButton();
-}
-
-function setupEventListeners() {
-    if(els.copyBtn) els.copyBtn.addEventListener('click', copyToClipboard);
-    if(els.copyLocalBtn) els.copyLocalBtn.addEventListener('click', copyLocalToClipboard);
-    
-    if(els.connectForm) els.connectForm.addEventListener('submit', handleConnect);
-    
-    if(els.peerIpInput) {
-        els.peerIpInput.addEventListener('input', () => handleIpValidation('input'));
-        els.peerIpInput.addEventListener('blur', () => handleIpValidation('blur'));
-    }
-    if(els.peerPortInput) els.peerPortInput.addEventListener('input', handlePortValidation);
-    
-    if(els.chatForm) els.chatForm.addEventListener('submit', handleChatSubmit);
-    
-    // New Disconnect Listeners
-    if(els.disconnectBtn) els.disconnectBtn.addEventListener('click', handleDisconnect);
-    if(els.cancelPunchBtn) els.cancelPunchBtn.addEventListener('click', handleDisconnect);
+    t.hideTimeout = setTimeout(() => {
+        t.classList.remove('show');
+    }, 3000);
 }
 
 init();

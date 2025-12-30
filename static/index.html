@@ -3,169 +3,151 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GhostLink | P2P Connection</title>
+    <title>GhostLink // TERMINAL</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Oxanium:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div class="container main-wrapper">
-        <header class="header">
-            <h1>GhostLink</h1>
-            <div class="status-badge" id="statusBadge">
-                <span class="status-dot"></span>
-                <span id="statusText">Disconnected</span>
-            </div>
-        </header>
+    <div class="crt-overlay"></div>
+    <div class="scanlines"></div>
+    <div class="vignette"></div>
+    <div class="grid-bg"></div>
 
-        <!-- HOME / DISCONNECTED VIEW -->
-        <div id="view-home" class="view-section active">
-            <div class="card">
-                <div style="display: flex; justify-content: space-between; align-items: end; margin-bottom: 0.75rem;">
-                    <label class="label" style="margin-bottom: 0;">Your Endpoints</label>
-                    <span id="natTypeDisplay" class="nat-badge">Detecting NAT...</span>
-                </div>
-                
-                <div style="margin-bottom: 0.75rem;">
-                    <label class="label" style="font-size: 0.8rem; margin-bottom: 0.25rem;">Public (Internet):</label>
-                    <div class="ip-display-group">
-                        <span class="ip-text" id="myIpDisplay">Initializing...</span>
-                        
-                        <div class="action-buttons">
-                            <button class="icon-btn" id="copyBtn" title="Copy to Clipboard">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            </button>
-                        </div>
+    <div class="ui-frame">
+        <div class="corner-decor tl"></div>
+        <div class="corner-decor tr"></div>
+        <div class="corner-decor bl"></div>
+        <div class="corner-decor br"></div>
+
+        <div class="container main-wrapper">
+            <header class="header">
+                <div class="header-content">
+                    <h1>GHOSTLINK <span class="version">v1.0</span></h1>
+                    <div class="status-badge" id="statusBadge">
+                        <span class="status-dot"></span>
+                        <span id="statusText">OFFLINE</span>
                     </div>
                 </div>
+            </header>
 
-                <div>
-                    <label class="label" style="font-size: 0.8rem; margin-bottom: 0.25rem;">Local (Network):</label>
-                    <div class="ip-display-group">
-                        <span class="ip-text" id="myLocalIpDisplay">Initializing...</span>
-                        
-                        <div class="action-buttons">
-                            <button class="icon-btn" id="copyLocalBtn" title="Copy to Clipboard">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            </button>
+            <div id="view-home" class="view-section active">
+                <div class="dashboard-grid">
+                    <div class="dashboard-col left">
+                        <div class="panel full-height">
+                            <div class="panel-header">
+                                <span class="panel-title">NETWORK_CONFIG</span>
+                                <span id="natTypeDisplay" class="nat-badge">SCANNING</span>
+                            </div>
+                            
+                            <div class="config-display">
+                                <div class="config-item">
+                                    <div class="info-label">PUBLIC_ENDPOINT</div>
+                                    <div class="info-val-group large">
+                                        <span class="ip-text" id="myIpDisplay">--.--.--.--</span>
+                                        <button class="icon-btn" id="copyBtn">COPY</button>
+                                    </div>
+                                </div>
+
+                                <div class="config-item">
+                                    <div class="info-label">LOCAL_ENDPOINT</div>
+                                    <div class="info-val-group large">
+                                        <span class="ip-text" id="myLocalIpDisplay">--.--.--.--</span>
+                                        <button class="icon-btn" id="copyLocalBtn">COPY</button>
+                                    </div>
+                                </div>
+                                <div id="apiErrorMsg" class="error-msg"></div>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <div id="apiErrorMsg" class="error-msg" style="margin-top: 0.5rem; text-align: center;"></div>
-            </div>
 
-            <div class="card">
-                <label class="label">Connect to Peer</label>
-                <form id="connectForm">
-                    <div class="input-row">
-                        <div style="flex: 2;">
-                            <input type="text" id="peerIp" placeholder="192.168.1.1" autocomplete="off">
-                            <div class="error-msg" id="ipError">Invalid IPv4 format</div>
+                    <div class="dashboard-col right">
+                        <div class="panel match-panel full-height">
+                            <div class="panel-header">
+                                <span class="panel-title">TARGET_ACQUISITION</span>
+                            </div>
+                            <form id="connectForm" class="connect-form-layout">
+                                <div class="input-grid">
+                                    <div class="input-group">
+                                        <label>TARGET_IP</label>
+                                        <input type="text" id="peerIp" placeholder="192.168.X.X" autocomplete="off">
+                                    </div>
+                                    <div class="input-group small">
+                                        <label>PORT</label>
+                                        <input type="number" id="peerPort" placeholder="8080" min="1" max="65535">
+                                    </div>
+                                </div>
+                                <div class="validation-feedback">
+                                    <span id="ipError">INVALID IP FORMAT</span>
+                                    <span id="portError">INVALID PORT RANGE</span>
+                                </div>
+                                <div class="action-area">
+                                    <button type="submit" class="btn-primary" disabled>INITIATE LINK SEQUENCE</button>
+                                </div>
+                            </form>
                         </div>
-                        <div style="flex: 1;">
-                            <input type="number" id="peerPort" placeholder="8080" min="1" max="65535">
-                            <div class="error-msg" id="portError">Invalid Port</div>
-                        </div>
-                    </div>
-                    <div style="margin-top: 1.5rem;">
-                        <button type="submit" class="btn-primary" disabled>Establish Link</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <!-- PUNCHING VIEW -->
-        <div id="view-punching" class="view-section">
-            <div class="card visualization-card">
-                <div class="network-viz">
-                    <div class="node">
-                        <div class="icon-circle client">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-                        </div>
-                        <div class="node-label">You</div>
-                        <div class="node-ip" id="vizClientIp">...</div>
-                    </div>
-
-                    <div class="connection-path">
-                        <div class="packet-stream">
-                            <div class="packet"></div>
-                            <div class="packet"></div>
-                            <div class="packet"></div>
-                        </div>
-                        <div class="path-line"></div>
-                        <!-- New Timeout Display -->
-                        <div class="timeout-badge" id="punchTimeout">--s</div>
-                    </div>
-
-                    <div class="node">
-                        <div class="icon-circle peer">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-                        </div>
-                        <div class="node-label">Peer</div>
-                        <div class="node-ip" id="vizPeerIp">Target</div>
                     </div>
                 </div>
             </div>
 
-            <div class="card terminal-card">
-                <div class="terminal-header">
-                    <span class="dot red"></span>
-                    <span class="dot yellow"></span>
-                    <span class="dot green"></span>
-                    <span class="title">Handshake Logs</span>
-                </div>
-                <div class="terminal-body" id="punchLogs">
-                    <div class="log-line system">> Initializing Hole Punching Sequence...</div>
+            <div id="view-punching" class="view-section">
+                <div class="punch-grid">
+                    <div class="matchmaking-column">
+                        <div class="matchmaking-display">
+                            <div class="match-ring"></div>
+                            <div class="match-ring-inner"></div>
+                            <div class="timer-container">
+                                <div class="timer-label">ESTABLISHING TUNNEL...</div>
+                                <div class="timer-value" id="punchTimerDisplay">00:00</div>
+                            </div>
+                        </div>
+                        <div class="abort-container">
+                             <button id="cancelPunchBtn" class="btn-secondary">ABORT SEQUENCE</button>
+                        </div>
+                    </div>
+
+                    <div class="logs-column">
+                        <div class="panel-header compact">
+                            <span class="panel-title">SYSTEM_LOGS</span>
+                        </div>
+                        <div class="terminal-container">
+                            <div class="terminal-logs" id="punchLogs"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div style="margin-top: 1.5rem; text-align: center;">
-                <button id="cancelPunchBtn" class="btn-secondary">Cancel Connection</button>
-            </div>
-        </div>
-
-        <!-- CONNECTED VIEW / CHAT -->
-        <div id="view-connected" class="view-section">
-            <div class="chat-container">
-                <div class="chat-header">
-                    <div class="chat-peer-info">
-                        <div class="peer-avatar">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            <div id="view-connected" class="view-section">
+                <div class="chat-interface">
+                    <div class="chat-header">
+                        <div class="peer-status">
+                            <div class="peer-icon"></div>
+                            <div class="peer-info">
+                                <div class="peer-name">SECURE UPLINK ESTABLISHED</div>
+                                <div class="peer-ip" id="chatPeerIp">...</div>
+                            </div>
                         </div>
-                        <div class="peer-details">
-                            <div class="peer-name">Connected Peer</div>
-                            <div class="peer-address" id="chatPeerIp">...</div>
-                        </div>
+                        <button id="disconnectBtn" class="btn-danger">TERMINATE UPLINK</button>
                     </div>
-                    <button id="disconnectBtn" class="icon-btn danger" title="Disconnect">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
-                    </button>
-                </div>
-                
-                <div class="chat-messages" id="chatMessages">
-                    <div class="chat-welcome">
-                        <div class="welcome-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-                        </div>
-                        <h3>Connection Established</h3>
-                        <p>You can now send and receive messages securely via P2P</p>
+                    
+                    <div class="chat-viewport" id="chatMessages">
+                        <div class="system-msg">CHANNEL ENCRYPTION VERIFIED</div>
                     </div>
-                </div>
-                
-                <div class="chat-input-container">
-                    <form id="chatForm" class="chat-input-form">
-                        <input type="text" id="chatInput" placeholder="Type a message..." autocomplete="off">
-                        <button type="submit" id="sendBtn" class="send-btn">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-                        </button>
+                    
+                    <form id="chatForm" class="chat-input-area">
+                        <span class="prompt">></span>
+                        <input type="text" id="chatInput" placeholder="ENTER_COMMAND_OR_MESSAGE..." autocomplete="off">
+                        <button type="submit" id="sendBtn" class="btn-send">TRANSMIT</button>
                     </form>
                 </div>
             </div>
         </div>
-
     </div>
 
     <div class="toast" id="toast">
-        <span class="toast-msg">Notification</span>
+        <span class="toast-msg">ALERT</span>
     </div>
 
     <script src="script.js"></script>
