@@ -11,6 +11,7 @@
 </head>
 <body>
 
+    <!-- Visual Effects -->
     <div class="crt-overlay"></div>
     <div class="scanlines"></div>
     <div class="vignette"></div>
@@ -25,14 +26,17 @@
         <div class="container main-wrapper">
             <header class="header">
                 <div class="header-content">
-                    <h1>GHOSTLINK <span class="version">v1.0</span></h1>
+                    <div class="title-group">
+                        <h1>GHOSTLINK <span class="version">v1.0</span></h1>
+                    </div>
                     <div class="status-badge" id="statusBadge">
                         <span class="status-dot"></span>
-                        <span id="statusText">OFFLINE</span>
+                        <span id="statusText">Initializing...</span>
                     </div>
                 </div>
             </header>
 
+            <!-- VIEW: HOME (Disconnected) -->
             <div id="view-home" class="view-section active">
                 <div class="dashboard-grid">
                     <div class="dashboard-col left">
@@ -73,16 +77,15 @@
                                     <div class="input-group">
                                         <label>TARGET_IP</label>
                                         <input type="text" id="peerIp" placeholder="192.168.X.X" autocomplete="off">
+                                        <span id="ipError" class="validation-error">INVALID IP FORMAT</span>
                                     </div>
                                     <div class="input-group small">
                                         <label>PORT</label>
                                         <input type="number" id="peerPort" placeholder="8080" min="1" max="65535">
+                                        <span id="portError" class="validation-error">INVALID PORT</span>
                                     </div>
                                 </div>
-                                <div class="validation-feedback">
-                                    <span id="ipError">INVALID IP FORMAT</span>
-                                    <span id="portError">INVALID PORT RANGE</span>
-                                </div>
+                                
                                 <div class="action-area">
                                     <button type="submit" class="btn-primary" disabled>INITIATE LINK SEQUENCE</button>
                                 </div>
@@ -92,6 +95,7 @@
                 </div>
             </div>
 
+            <!-- VIEW: PUNCHING (Connecting) -->
             <div id="view-punching" class="view-section">
                 <div class="punch-grid">
                     <div class="matchmaking-column">
@@ -100,9 +104,15 @@
                             <div class="match-ring-inner"></div>
                             <div class="timer-container">
                                 <div class="timer-label">ESTABLISHING TUNNEL...</div>
-                                <div class="timer-value" id="punchTimerDisplay">00:00</div>
+                                <!-- ID matches static/script.js logic -->
+                                <div class="timer-value" id="punchTimeout">--s</div>
                             </div>
                         </div>
+                        
+                        <!-- Hidden elements required by static logic -->
+                        <div id="vizClientIp" style="display: none;"></div>
+                        <div id="vizPeerIp" style="display: none;"></div>
+
                         <div class="abort-container">
                              <button id="cancelPunchBtn" class="btn-secondary">ABORT SEQUENCE</button>
                         </div>
@@ -119,6 +129,7 @@
                 </div>
             </div>
 
+            <!-- VIEW: CONNECTED (Chat) -->
             <div id="view-connected" class="view-section">
                 <div class="chat-interface">
                     <div class="chat-header">
@@ -146,6 +157,7 @@
         </div>
     </div>
 
+    <!-- Toast Notification -->
     <div class="toast" id="toast">
         <span class="toast-msg">ALERT</span>
     </div>

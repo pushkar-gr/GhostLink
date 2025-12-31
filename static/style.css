@@ -24,10 +24,12 @@ body {
     margin: 0;
 }
 
+/* --- CRT Effects --- */
 .crt-overlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: radial-gradient(circle, rgba(16, 25, 30, 0) 60%, rgba(0,0,0,0.8) 100%);
+    background: radial-gradient(circle, rgba(16, 25, 30, 0) 60%, rgba(0,0,0,0.4) 100%);
     z-index: 900; pointer-events: none;
+    transition: opacity 0.5s ease;
 }
 
 .scanlines {
@@ -37,12 +39,21 @@ body {
     z-index: 901; pointer-events: none;
     animation: scrollLines 10s linear infinite;
     opacity: var(--scan-strength);
+    transition: opacity 0.5s ease;
 }
 
 .vignette {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    box-shadow: inset 0 0 100px rgba(0,0,0,0.9);
+    box-shadow: inset 0 0 50px rgba(0,0,0,0.7);
     z-index: 902; pointer-events: none;
+    transition: opacity 0.5s ease;
+}
+
+/* --- DYNAMIC STATE: Connected (Remove Effects) --- */
+body:has(#view-connected.active) .crt-overlay,
+body:has(#view-connected.active) .scanlines,
+body:has(#view-connected.active) .vignette {
+    opacity: 0;
 }
 
 .grid-bg {
@@ -67,6 +78,7 @@ body {
     100% { transform: perspective(500px) rotateX(20deg) translateY(-40px); }
 }
 
+/* --- Layout Frame --- */
 .ui-frame {
     position: relative;
     width: 100vw;
@@ -115,17 +127,27 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* --- Header Layout --- */
 .header {
     margin-bottom: 2rem;
     border-bottom: 1px solid rgba(255,255,255,0.1);
     padding-bottom: 1rem;
     flex-shrink: 0;
+    transition: all 0.3s ease;
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
 }
 
 .header h1 {
     font-size: 3rem; letter-spacing: 6px; color: #fff;
     text-shadow: 0 0 20px rgba(255,255,255,0.5);
-    margin-bottom: 0.5rem;
+    margin: 0;
+    transition: font-size 0.3s ease;
 }
 
 .version { font-size: 1rem; color: var(--accent); opacity: 0.7; }
@@ -134,8 +156,28 @@ body {
     display: inline-flex; align-items: center; gap: 12px;
     font-family: var(--font-mono); font-size: 1rem; color: var(--text-dim);
 }
-.status-dot { width: 10px; height: 10px; background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+.status-dot { width: 10px; height: 10px; background: var(--danger); box-shadow: 0 0 10px var(--danger); transition: background-color 0.3s; }
 
+/* --- DYNAMIC STATE: Connected Header --- */
+/* Shrink the main header when connected */
+body:has(#view-connected.active) .header {
+    margin-bottom: 0;
+    padding: 0.5rem 2rem;
+    background: rgba(0,0,0,0.8);
+    border-bottom: none;
+}
+
+body:has(#view-connected.active) .header h1 {
+    font-size: 1.2rem; /* Much smaller */
+    letter-spacing: 2px;
+}
+
+body:has(#view-connected.active) .status-badge {
+    font-size: 0.8rem;
+}
+
+
+/* --- Dashboard / Panels --- */
 .dashboard-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -160,6 +202,8 @@ body {
 .panel-header.compact { margin-bottom: 1rem; }
 .panel-title { font-size: 1rem; letter-spacing: 3px; color: var(--accent); text-shadow: 0 0 8px var(--accent); }
 .nat-badge { font-family: var(--font-mono); font-size: 0.9rem; background: #fff; color: #000; padding: 4px 8px; }
+.nat-badge.cone { color: #000; background: var(--success); }
+.nat-badge.symmetric { color: #fff; background: var(--danger); }
 
 .config-display { display: flex; flex-direction: column; gap: 3rem; justify-content: center; flex: 1; }
 .config-item { border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 1rem; }
@@ -186,6 +230,10 @@ input {
     font-size: 1.4rem; width: 100%; outline: none; transition: 0.3s;
 }
 input:focus { border-color: var(--accent); box-shadow: 0 0 20px var(--accent-dim); }
+input.valid { border-color: var(--success); box-shadow: 0 0 10px rgba(0, 255, 157, 0.2); }
+input.error { border-color: var(--danger); box-shadow: 0 0 10px rgba(255, 0, 60, 0.2); }
+
+.validation-error { color: var(--danger); font-size: 0.8rem; display: none; margin-top: 5px; }
 
 .btn-primary {
     width: 100%; padding: 1.5rem;
@@ -196,7 +244,6 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 20px var(--accent-dim
 }
 .btn-primary:hover:not(:disabled) { background: #fff; box-shadow: 0 0 30px rgba(255,255,255,0.5); }
 .btn-primary:disabled { background: #333; color: #555; cursor: not-allowed; }
-.validation-feedback span { display: none; color: var(--danger); font-size: 0.8rem; margin-bottom: 1rem; }
 
 .punch-grid {
     display: grid; grid-template-columns: 40% 1fr;
@@ -268,13 +315,17 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 20px var(--accent-dim
 .chat-interface { display: flex; flex-direction: column; height: 100%; }
 .chat-header {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 1.5rem 3rem; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.5);
+    /* Reduced padding and height */
+    padding: 0 2rem; 
+    border-bottom: 1px solid rgba(255,255,255,0.1); 
+    background: rgba(0,0,0,0.5);
+    height: 50px; 
 }
-.peer-status { display: flex; gap: 20px; align-items: center; }
-.peer-icon { width: 40px; height: 40px; background: var(--success); clip-path: polygon(20% 0, 100% 0, 100% 80%, 80% 100%, 0 100%, 0 20%); }
-.peer-name { font-size: 1.2rem; letter-spacing: 2px; color: var(--success); font-weight: bold; }
-.peer-ip { font-size: 0.9rem; font-family: var(--font-mono); color: var(--text-dim); }
-.btn-danger { background: rgba(255, 0, 60, 0.2); border: 1px solid var(--danger); color: var(--danger); padding: 8px 16px; cursor: pointer; font-size: 0.9rem; letter-spacing: 2px; transition: 0.3s; }
+.peer-status { display: flex; gap: 15px; align-items: center; }
+.peer-icon { width: 24px; height: 24px; background: var(--success); clip-path: polygon(20% 0, 100% 0, 100% 80%, 80% 100%, 0 100%, 0 20%); }
+.peer-name { font-size: 0.9rem; letter-spacing: 2px; color: var(--success); font-weight: bold; }
+.peer-ip { font-size: 0.8rem; font-family: var(--font-mono); color: var(--text-dim); }
+.btn-danger { background: rgba(255, 0, 60, 0.2); border: 1px solid var(--danger); color: var(--danger); padding: 4px 12px; cursor: pointer; font-size: 0.8rem; letter-spacing: 2px; transition: 0.3s; }
 .btn-danger:hover { background: var(--danger); color: #fff; box-shadow: 0 0 15px var(--danger); }
 
 .chat-viewport {
@@ -284,10 +335,49 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 20px var(--accent-dim
     background: rgba(0,0,0,0.3);
 }
 .system-msg { text-align: center; color: var(--success); font-size: 0.9rem; margin: 2rem 0; opacity: 0.8; letter-spacing: 2px; }
-.msg-line { display: flex; gap: 15px; }
-.msg-line.me { color: var(--accent); }
-.msg-line.peer { color: #fff; }
-.msg-prefix { opacity: 0.5; width: 60px; text-align: right; }
+
+/* -- Logic Script Chat Styles -- */
+.chat-welcome { text-align: center; color: var(--text-dim); margin-top: 2rem; }
+.chat-welcome h3 { color: var(--accent); margin: 10px 0; }
+
+.message {
+    display: flex;
+    margin-bottom: 0.5rem;
+    animation: messageSlide 0.2s ease-out;
+}
+@keyframes messageSlide {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.message.from-me { justify-content: flex-end; }
+.message.from-peer { justify-content: flex-start; }
+
+.message-bubble {
+    max-width: 70%;
+    padding: 1rem 1.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    position: relative;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.message.from-me .message-bubble {
+    background: rgba(0, 243, 255, 0.1);
+    border-color: var(--accent);
+    color: #fff;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+
+.message.from-peer .message-bubble {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-main);
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+
+.message-time {
+    display: block; font-size: 0.7rem; opacity: 0.5; margin-top: 5px; text-align: right;
+}
 
 .chat-input-area {
     display: flex; padding: 2rem 4rem; border-top: 1px solid rgba(255,255,255,0.1);
