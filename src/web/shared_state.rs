@@ -34,6 +34,12 @@ pub struct AppState {
     /// Peer's IP address.
     pub peer_ip: Option<SocketAddr>,
 
+    // --- ENCRYPTION STATE ---
+    /// The Short Authentication String (SAS) fingerprint for manual verification.
+    pub fingerprint: Option<String>,
+    /// The name of the negotiated encryption algorithm (e.g., "ChaCha20-Poly1305").
+    pub encryption_algo: Option<String>,
+    // ------------------------
     /// Channel for sending commands to the controller.
     #[serde(skip)]
     cmd_tx: mpsc::Sender<Command>,
@@ -57,6 +63,8 @@ impl AppState {
             nat_type: NatType::default(),
             status: Status::default(),
             peer_ip: None,
+            fingerprint: None,
+            encryption_algo: None,
             cmd_tx,
             event_tx,
         }
@@ -85,7 +93,7 @@ impl AppState {
         self.local_ip = Some(addr);
         self.broadcast_status_change(message, timeout);
     }
-
+    #[allow(dead_code)]
     /// Updates public IP and notifies listeners.
     pub fn set_public_ip(
         &mut self,
@@ -121,6 +129,16 @@ impl AppState {
         self.broadcast_status_change(message, timeout);
     }
 
+    /// Updates security details for current session.
+    /// Called by handshake module upon successful key exchange.
+    pub fn set_security_info(&mut self, fingerprint: String, algorithm: String) {
+        self.fingerprint = Some(fingerprint);
+        self.encryption_algo = Some(algorithm);
+        // Note: Does not broadcast immediately.
+        // Handshake typically calls set_status(Connected) right after,
+        // which triggers broadcast with this new data included.
+    }
+
     /// Broadcasts current state to all active listeners.
     ///
     /// Constructs an event based on the current status and sends it
@@ -134,8 +152,12 @@ impl AppState {
             },
             // During punching, sends progress updates and timeouts.
             Status::Punching => AppEvent::Punching { timeout, message },
-            // When connected, sends status messages.
-            Status::Connected => AppEvent::Connected { message },
+            // When connected, sends status messages AND security info.
+            Status::Connected => AppEvent::Connected {
+                message,
+                fingerprint: self.fingerprint.clone(),
+                encryption_algo: self.encryption_algo.clone(),
+            },
         };
         self.broadcast_event(event);
     }
@@ -160,6 +182,7 @@ impl AppState {
 ///
 /// Determines if direct P2P connections are possible.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
+#[allow(dead_code)]
 pub enum NatType {
     /// NAT type not yet determined.
     #[default]
@@ -197,6 +220,10 @@ pub enum AppEvent {
     Connected {
         /// System or peer message.
         message: Option<String>,
+        /// SAS Fingerprint for UI verification
+        fingerprint: Option<String>,
+        /// Algorithm used
+        encryption_algo: Option<String>,
     },
 
     Message {
@@ -233,4 +260,159 @@ pub enum Command {
 
     /// Disconnect from current peer
     Disconnect,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn create_test_state() -> AppState {
+        let (cmd_tx, _cmd_rx) = mpsc::channel(32);
+        let (event_tx, _event_rx) = broadcast::channel(32);
+        AppState::new(cmd_tx, event_tx)
+    }
+
+    #[test]
+    fn test_app_state_initialization() {
+        let state = create_test_state();
+
+        assert_eq!(state.local_ip, None);
+        assert_eq!(state.public_ip, None);
+        assert_eq!(state.nat_type, NatType::Unknown);
+        assert_eq!(state.status, Status::Disconnected);
+        assert_eq!(state.peer_ip, None);
+        assert_eq!(state.fingerprint, None);
+        assert_eq!(state.encryption_algo, None);
+    }
+
+    #[test]
+    fn test_set_local_ip() {
+        let mut state = create_test_state();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), 8080);
+
+        state.set_local_ip(addr, Some("Local IP set".into()), None);
+
+        assert_eq!(state.local_ip, Some(addr));
+    }
+
+    #[test]
+    fn test_set_public_ip() {
+        let mut state = create_test_state();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 5678);
+
+        state.set_public_ip(addr, Some("Public IP resolved".into()), None);
+
+        assert_eq!(state.public_ip, Some(addr));
+    }
+
+    #[test]
+    fn test_set_nat_type() {
+        let mut state = create_test_state();
+
+        state.set_nat_type(NatType::Cone, Some("NAT detected".into()), None);
+        assert_eq!(state.nat_type, NatType::Cone);
+
+        state.set_nat_type(NatType::Symmetric, None, None);
+        assert_eq!(state.nat_type, NatType::Symmetric);
+    }
+
+    #[test]
+    fn test_set_status() {
+        let mut state = create_test_state();
+
+        state.set_status(Status::Punching, Some("Connecting...".into()), Some(30));
+        assert_eq!(state.status, Status::Punching);
+
+        state.set_status(Status::Connected, Some("Connected".into()), None);
+        assert_eq!(state.status, Status::Connected);
+    }
+
+    #[test]
+    fn test_set_peer_ip() {
+        let mut state = create_test_state();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 9999);
+
+        state.set_peer_ip(addr, Some("Peer set".into()), None);
+
+        assert_eq!(state.peer_ip, Some(addr));
+    }
+
+    #[test]
+    fn test_set_security_info() {
+        let mut state = create_test_state();
+
+        state.set_security_info("abcd1234".to_string(), "ChaCha20-Poly1305".to_string());
+
+        assert_eq!(state.fingerprint, Some("abcd1234".to_string()));
+        assert_eq!(state.encryption_algo, Some("ChaCha20-Poly1305".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_event_subscription() {
+        let (cmd_tx, _cmd_rx) = mpsc::channel(32);
+        let (event_tx, _event_rx) = broadcast::channel(32);
+        let state = AppState::new(cmd_tx, event_tx);
+
+        let mut rx = state.subscribe_events();
+
+        // Send a test event
+        state.add_message("Test message".to_string(), true);
+
+        // Should receive the event
+        let event = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await;
+
+        assert!(event.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_command_channel() {
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(32);
+        let (event_tx, _event_rx) = broadcast::channel(32);
+        let state = AppState::new(cmd_tx.clone(), event_tx);
+
+        // Send a command
+        state.cmd_tx().send(Command::ConnectPeer).await.unwrap();
+
+        // Should receive the command
+        let cmd = cmd_rx.recv().await;
+        assert!(cmd.is_some());
+    }
+
+    #[test]
+    fn test_nat_type_equality() {
+        assert_eq!(NatType::Unknown, NatType::Unknown);
+        assert_eq!(NatType::Cone, NatType::Cone);
+        assert_eq!(NatType::Symmetric, NatType::Symmetric);
+
+        assert_ne!(NatType::Unknown, NatType::Cone);
+        assert_ne!(NatType::Cone, NatType::Symmetric);
+    }
+
+    #[test]
+    fn test_status_equality() {
+        assert_eq!(Status::Disconnected, Status::Disconnected);
+        assert_eq!(Status::Punching, Status::Punching);
+        assert_eq!(Status::Connected, Status::Connected);
+
+        assert_ne!(Status::Disconnected, Status::Punching);
+        assert_ne!(Status::Punching, Status::Connected);
+    }
+
+    #[test]
+    fn test_clear_chat() {
+        let state = create_test_state();
+
+        // Should not panic
+        state.clear_chat();
+    }
+
+    #[test]
+    fn test_add_message() {
+        let state = create_test_state();
+
+        // Should not panic
+        state.add_message("Hello".to_string(), true);
+        state.add_message("World".to_string(), false);
+    }
 }

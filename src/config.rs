@@ -1,3 +1,11 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EncryptionMode {
+    ChaCha20Poly1305,
+    Aes256Gcm,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub client_port: u16,
@@ -7,6 +15,7 @@ pub struct Config {
     pub handshake_timeout_secs: u64,
     pub punch_hole_secs: u64,
     pub disconnect_timeout_ms: u64,
+    pub encryption_mode: EncryptionMode,
 }
 
 impl Config {
@@ -19,6 +28,7 @@ impl Config {
             handshake_timeout_secs: 30,
             punch_hole_secs: 15,
             disconnect_timeout_ms: 500,
+            encryption_mode: EncryptionMode::ChaCha20Poly1305,
         }
     }
 }

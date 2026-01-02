@@ -1,6 +1,6 @@
 //! Network utilities for GhostLink.
 //!
-//! Handles NAT traversal and public IP discovery using STUN.
+//! Provides NAT traversal and public IP discovery using STUN.
 
 use super::web::shared_state::NatType;
 use anyhow::{Context, Result, bail};
@@ -16,25 +16,24 @@ use tokio::{
 };
 use tracing::debug;
 
-/// The duration to wait for a STUN response before timing out.
+/// Duration to wait for STUN response before timing out.
 const STUN_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Resolves the local IP address using a DNS server.
+/// Resolves local IP address using DNS server.
 ///
-/// Connecting to a remote address causes the OS
-/// to select the appropriate local interface and IP.
+/// Connecting to remote address causes OS to select appropriate local interface and IP.
 ///
 /// # Returns
 ///
-/// * `Ok(SocketAddr)` - Local IP and port
-/// * `Err` - If resolution fails
+/// * `Ok(SocketAddr)` - Local IP and port.
+/// * `Err` - Resolution failed.
 pub async fn get_local_ip(local_port: u16) -> Result<SocketAddr> {
     // Connect to Google's public DNS
     let socket = UdpSocket::bind(("0.0.0.0", 0)).await?;
     socket.connect("8.8.8.8:80").await?;
     let local_addr = socket.local_addr()?;
 
-    // Replace the ephemeral port with the actual listening port
+    // Replace ephemeral port with actual listening port
     let local_ip = match local_addr.ip() {
         IpAddr::V4(ip) => SocketAddr::new(IpAddr::V4(ip), local_port),
         IpAddr::V6(ip) => SocketAddr::new(IpAddr::V6(ip), local_port),
@@ -45,22 +44,23 @@ pub async fn get_local_ip(local_port: u16) -> Result<SocketAddr> {
 
 /// Discovers public IP and port using STUN.
 ///
-/// Workflow:
-/// 1. Resolves STUN server DNS
-/// 2. Sends BINDING_REQUEST
-/// 3. Waits for response (3 second timeout)
-/// 4. Validates transaction ID
-/// 5. Extracts public address
+/// # Workflow
+///
+/// 1. Resolves STUN server DNS.
+/// 2. Sends BINDING_REQUEST.
+/// 3. Waits for response (3 second timeout).
+/// 4. Validates transaction ID.
+/// 5. Extracts public address.
 ///
 /// # Arguments
 ///
-/// * `socket` - Bound UDP socket
-/// * `stun_server` - STUN server address (e.g., "stun.l.google.com:19302")
+/// * `socket` - Bound UDP socket.
+/// * `stun_server` - STUN server address (e.g., "stun.l.google.com:19302").
 ///
 /// # Returns
 ///
-/// * `Ok(SocketAddr)` - Public IP and port
-/// * `Err` - If DNS, network, or STUN validation fails
+/// * `Ok(SocketAddr)` - Public IP and port.
+/// * `Err` - DNS, network, or STUN validation failed.
 pub async fn resolve_public_ip(
     socket: &UdpSocket,
     stun_server: impl AsRef<str>,
@@ -68,32 +68,46 @@ pub async fn resolve_public_ip(
     let stun_server = stun_server.as_ref();
     debug!("Querying STUN server: {}", stun_server);
 
-    // 1. Resolve DNS for the STUN server.
+    // 1. Determine socket type (IPv4 or IPv6)
+    let local_addr = socket
+        .local_addr()
+        .context("Could not get local socket address")?;
+    let is_ipv4_socket = local_addr.is_ipv4();
+
+    // 2. Resolve DNS for STUN server
     let mut addrs = tokio::net::lookup_host(stun_server)
         .await
         .context(format!("Failed to resolve DNS for {}", stun_server))?;
 
-    // Use the first resolved IP address
+    // 3. Filter addresses compatible with socket type
     let target_addr = addrs
-        .next()
-        .context("STUN server domain name did not resolve to any IP address")?;
+        .find(|addr| {
+            if is_ipv4_socket {
+                addr.is_ipv4()
+            } else {
+                addr.is_ipv6()
+            }
+        })
+        .context(format!(
+            "STUN server {} has no addresses compatible with socket (Protocol Mismatch)",
+            stun_server
+        ))?;
 
-    // Build the STUN binding request
+    // Build STUN binding request
     let mut msg = Message::new();
     msg.build(&[Box::<TransactionId>::default(), Box::new(BINDING_REQUEST)])?;
 
     let expected_tx_id = msg.transaction_id;
 
-    // 2. Send the request
+    // 4. Send request
     socket
         .send_to(&msg.raw, target_addr)
         .await
         .context("Failed to send STUN request")?;
 
-    // 3. Wait for response with timeout
+    // 5. Wait for response with timeout (UDP packets can be lost)
     let mut buf = [0u8; 1024];
 
-    // Use timeout as UDP packets can be lost.
     let (len, sender_addr) = timeout(STUN_TIMEOUT, socket.recv_from(&mut buf))
         .await
         .context("STUN request timed out")?
@@ -101,7 +115,7 @@ pub async fn resolve_public_ip(
 
     debug!("Received {} bytes from {}", len, sender_addr);
 
-    // 4. Parse and validate response
+    // 6. Parse and validate response
     let mut response = Message::new();
     response.unmarshal_binary(&buf[..len])?;
 
@@ -113,7 +127,7 @@ pub async fn resolve_public_ip(
         );
     }
 
-    // 5. Extract the public IP
+    // 7. Extract public IP
     let mut xor_addr = XorMappedAddress::default();
     xor_addr
         .get_from(&response)
@@ -125,32 +139,32 @@ pub async fn resolve_public_ip(
     Ok(public_addr)
 }
 
-/// Detects NAT type by querying a second STUN server.
+/// Detects NAT type by querying second STUN server.
 ///
-/// Compares the public port from two different STUN servers:
-/// - Same port → Cone NAT (P2P-friendly)
-/// - Different port → Symmetric NAT (P2P-difficult)
+/// Compares public port from two different STUN servers:
+/// - Same port → Cone NAT (P2P-friendly).
+/// - Different port → Symmetric NAT (P2P-difficult).
 ///
 /// # Arguments
 ///
-/// * `socket` - Bound UDP socket
-/// * `stun_server` - Second STUN server address
-/// * `prev_addr` - Address from first STUN query
+/// * `socket` - Bound UDP socket.
+/// * `stun_server` - Second STUN server address.
+/// * `prev_addr` - Address from first STUN query.
 ///
 /// # Returns
 ///
-/// NAT type: Cone, Symmetric, or Unknown
+/// NAT type: Cone, Symmetric, or Unknown.
 pub async fn get_nat_type(
     socket: &UdpSocket,
     stun_server: impl AsRef<str>,
     prev_addr: SocketAddr,
 ) -> NatType {
-    // resolve the public IP using new STUN server
+    // Resolve public IP using new STUN server
     resolve_public_ip(socket, stun_server).await.map_or_else(
-        // return `Unknown` if any error.
+        // Return Unknown if any error
         |_| NatType::Unknown,
         |public_ip| {
-            // return type of NAT based on response.
+            // Return NAT type based on response
             if prev_addr == public_ip {
                 NatType::Cone
             } else {
