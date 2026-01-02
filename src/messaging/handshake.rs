@@ -592,4 +592,170 @@ mod tests {
         assert_eq!(state_a.read().await.status, Status::Connected);
         assert_eq!(state_b.read().await.status, Status::Connected);
     }
+
+    #[tokio::test]
+    async fn test_handshake_with_aes256_mode() {
+        let socket_a = bind_local().await;
+        let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
+        let state_b = create_dummy_state();
+
+        let addr_a = socket_a.local_addr().unwrap();
+        let addr_b = socket_b.local_addr().unwrap();
+
+        // Test handshake with AES-256-GCM encryption mode
+        let socket_a_clone = socket_a.clone();
+        let state_a_clone = state_a.clone();
+        let handle_a = tokio::spawn(async move {
+            handshake(
+                socket_a_clone,
+                addr_b,
+                state_a_clone,
+                5,
+                EncryptionMode::Aes256Gcm,
+            )
+            .await
+        });
+
+        let socket_b_clone = socket_b.clone();
+        let state_b_clone = state_b.clone();
+        let handle_b = tokio::spawn(async move {
+            handshake(
+                socket_b_clone,
+                addr_a,
+                state_b_clone,
+                5,
+                EncryptionMode::Aes256Gcm,
+            )
+            .await
+        });
+
+        let result_a = handle_a.await.unwrap();
+        let result_b = handle_b.await.unwrap();
+
+        assert!(
+            result_a.is_ok(),
+            "Peer A should complete handshake with AES"
+        );
+        assert!(
+            result_b.is_ok(),
+            "Peer B should complete handshake with AES"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handshake_sets_fingerprint() {
+        let socket_a = bind_local().await;
+        let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
+        let state_b = create_dummy_state();
+
+        let addr_a = socket_a.local_addr().unwrap();
+        let addr_b = socket_b.local_addr().unwrap();
+
+        let socket_a_clone = socket_a.clone();
+        let state_a_clone = state_a.clone();
+        let handle_a = tokio::spawn(async move {
+            handshake(
+                socket_a_clone,
+                addr_b,
+                state_a_clone,
+                5,
+                EncryptionMode::ChaCha20Poly1305,
+            )
+            .await
+        });
+
+        let socket_b_clone = socket_b.clone();
+        let state_b_clone = state_b.clone();
+        let handle_b = tokio::spawn(async move {
+            handshake(
+                socket_b_clone,
+                addr_a,
+                state_b_clone,
+                5,
+                EncryptionMode::ChaCha20Poly1305,
+            )
+            .await
+        });
+
+        let _ = handle_a.await.unwrap();
+        let _ = handle_b.await.unwrap();
+
+        // Both peers should have fingerprint set
+        let fp_a = state_a.read().await.fingerprint.clone();
+        let fp_b = state_b.read().await.fingerprint.clone();
+
+        assert!(fp_a.is_some(), "Peer A should have fingerprint");
+        assert!(fp_b.is_some(), "Peer B should have fingerprint");
+        assert_eq!(fp_a, fp_b, "Fingerprints should match");
+    }
+
+    #[tokio::test]
+    async fn test_handshake_with_very_short_timeout() {
+        let socket_a = bind_local().await;
+        let state_a = create_dummy_state();
+
+        let addr_a = socket_a.local_addr().unwrap();
+
+        // Use very short timeout that will likely fail
+        let result = handshake(
+            socket_a,
+            addr_a, // Wrong address (self)
+            state_a,
+            1, // 1 second timeout
+            EncryptionMode::ChaCha20Poly1305,
+        )
+        .await;
+
+        // Should timeout or fail
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_handshake_status_transitions() {
+        let socket_a = bind_local().await;
+        let socket_b = bind_local().await;
+        let state_a = create_dummy_state();
+        let state_b = create_dummy_state();
+
+        let addr_a = socket_a.local_addr().unwrap();
+        let addr_b = socket_b.local_addr().unwrap();
+
+        // Check initial status
+        assert_eq!(state_a.read().await.status, Status::Disconnected);
+
+        let socket_a_clone = socket_a.clone();
+        let state_a_clone = state_a.clone();
+        let handle_a = tokio::spawn(async move {
+            handshake(
+                socket_a_clone,
+                addr_b,
+                state_a_clone,
+                5,
+                EncryptionMode::ChaCha20Poly1305,
+            )
+            .await
+        });
+
+        let socket_b_clone = socket_b.clone();
+        let state_b_clone = state_b.clone();
+        let handle_b = tokio::spawn(async move {
+            handshake(
+                socket_b_clone,
+                addr_a,
+                state_b_clone,
+                5,
+                EncryptionMode::ChaCha20Poly1305,
+            )
+            .await
+        });
+
+        let _ = handle_a.await.unwrap();
+        let _ = handle_b.await.unwrap();
+
+        // Status should transition to Connected
+        assert_eq!(state_a.read().await.status, Status::Connected);
+        assert_eq!(state_b.read().await.status, Status::Connected);
+    }
 }

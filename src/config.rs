@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncryptionMode {
     ChaCha20Poly1305,
     Aes256Gcm,
 }
+
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Config {
     pub client_port: u16,
     pub stun_server: String,

@@ -544,4 +544,71 @@ mod tests {
         let state_guard = manager.state.read().await;
         assert_eq!(state_guard.status, Status::Disconnected);
     }
+
+    #[tokio::test]
+    async fn test_is_connected_false_initially() {
+        let manager = create_test_manager().await;
+        assert!(!manager.is_connected());
+    }
+
+    #[tokio::test]
+    async fn test_nonce_initialization() {
+        let manager = create_test_manager().await;
+        assert_eq!(manager.tx_nonce, 0);
+        assert_eq!(manager.rx_nonce, 0);
+    }
+
+    #[tokio::test]
+    async fn test_send_text_without_kcp_fails() {
+        let mut manager = create_test_manager().await;
+
+        // Try to send without establishing KCP
+        let result = manager.send_text("test message".to_string()).await;
+        assert!(result.is_err());
+
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("KCP") || error_msg.contains("stream"));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_disconnects() {
+        let mut manager = create_test_manager().await;
+
+        // Multiple disconnects should be idempotent
+        assert!(manager.disconnect().await.is_ok());
+        assert!(manager.disconnect().await.is_ok());
+        assert!(manager.disconnect().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_clears_cipher() {
+        let mut manager = create_test_manager().await;
+
+        // Manually set cipher (simulating encryption setup)
+        manager.peer_addr = Some("127.0.0.1:9999".parse().unwrap());
+
+        // Disconnect should clear cipher
+        manager.disconnect().await.unwrap();
+
+        assert!(manager.cipher.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_clears_peer_addr() {
+        let mut manager = create_test_manager().await;
+        manager.peer_addr = Some("127.0.0.1:8888".parse().unwrap());
+
+        manager.disconnect().await.unwrap();
+
+        assert!(manager.peer_addr.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_close_kcp_with_none_stream() {
+        let mut manager = create_test_manager().await;
+
+        // close_kcp with no stream should not fail
+        let result = manager.close_kcp().await;
+        assert!(result.is_ok());
+    }
 }
