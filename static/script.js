@@ -8,6 +8,9 @@ const state = {
     isIpValid: false,
     isPortValid: false,
     sseSource: null,
+    // NEW: Session state
+    fingerprint: null,
+    username: null
 };
 
 // --- DOM Elements ---
@@ -25,13 +28,14 @@ const els = {
     // Home
     myIpDisplay: document.getElementById('myIpDisplay'),
     myLocalIpDisplay: document.getElementById('myLocalIpDisplay'),
-    natTypeDisplay: document.getElementById('natTypeDisplay'), // New NAT Element
+    natTypeDisplay: document.getElementById('natTypeDisplay'),
     apiErrorMsg: document.getElementById('apiErrorMsg'),
     copyBtn: document.getElementById('copyBtn'),
     copyLocalBtn: document.getElementById('copyLocalBtn'),
     connectForm: document.getElementById('connectForm'),
     peerIpInput: document.getElementById('peerIp'),
     peerPortInput: document.getElementById('peerPort'),
+    usernameInput: document.getElementById('usernameInput'), // New Input
     ipError: document.getElementById('ipError'),
     portError: document.getElementById('portError'),
     submitBtn: document.querySelector('#connectForm button'),
@@ -41,7 +45,7 @@ const els = {
     vizPeerIp: document.getElementById('vizPeerIp'),
     punchLogs: document.getElementById('punchLogs'),
     punchTimeout: document.getElementById('punchTimeout'),
-    cancelPunchBtn: document.getElementById('cancelPunchBtn'), // New Cancel Button
+    cancelPunchBtn: document.getElementById('cancelPunchBtn'),
 
     // Connected / Chat
     chatMessages: document.getElementById('chatMessages'),
@@ -49,7 +53,13 @@ const els = {
     chatForm: document.getElementById('chatForm'),
     chatInput: document.getElementById('chatInput'),
     sendBtn: document.getElementById('sendBtn'),
-    disconnectBtn: document.getElementById('disconnectBtn'), // New Disconnect Button
+    disconnectBtn: document.getElementById('disconnectBtn'),
+    verifyIdentityBtn: document.getElementById('verifyIdentityBtn'), // New Button
+
+    // SAS Modal (New)
+    sasModal: document.getElementById('sasModal'),
+    sasDisplay: document.getElementById('sasDisplay'),
+    closeSasBtn: document.getElementById('closeSasBtn'),
 
     // Toast
     toast: document.getElementById('toast'),
@@ -59,22 +69,13 @@ const els = {
 // --- Initialization ---
 async function init() {
     toggleSubmitButton();
-    
-    // Initial fetch of the complete application state
     await fetchState();
-    
-    // Connect to SSE for real-time updates
     connectSSE();
-
     setupEventListeners();
 }
 
 // --- State Logic ---
 
-/**
- * Fetches the complete state from the backend via the new /api/state endpoint.
- * Replaces old /api/ip, /api/status, and /api/peer calls.
- */
 async function fetchState() {
     els.myIpDisplay.style.opacity = '0.5';
 
@@ -83,9 +84,6 @@ async function fetchState() {
         if (!res.ok) throw new Error(`Server error`);
         
         const jsonResponse = await res.json();
-        
-        // The server returns: { "state": { public_ip: "...", ... } }
-        // We must unwrap the "state" key.
         const appState = jsonResponse.state;
         
         if (appState) {
@@ -106,34 +104,26 @@ async function fetchState() {
     }
 }
 
-/**
- * Centralizes logic for updating the frontend state from a backend AppState object.
- * Can be called from the REST API fetch or from an SSE Disconnected event.
- */
 function syncState(data) {
     if (!data) return;
 
-    // 1. Public IP
     if (data.public_ip) state.fullAddress = data.public_ip;
-    
-    // 2. Local IP
     if (data.local_ip) state.localAddress = data.local_ip;
     
-    // 3. Peer IP
     if (data.peer_ip) state.peerAddress = data.peer_ip;
-    else if (data.peer_ip === null) state.peerAddress = null; // Explicit reset
+    else if (data.peer_ip === null) state.peerAddress = null;
 
-    // 4. NAT Type (New)
     if (data.nat_type) {
         state.natType = data.nat_type;
         renderNatType();
     }
 
-    // 5. Status
+    // Capture Security Fingerprint if available
+    if (data.fingerprint) {
+        state.fingerprint = data.fingerprint;
+    }
+
     if (data.status) {
-        // reuse handleStatusChange to trigger UI transitions if needed,
-        // but strictly speaking, fetchState is usually for init/refresh.
-        // We pass the whole data object so handleStatusChange can see the fields.
         handleStatusChange(data.status, data);
     }
 }
@@ -141,36 +131,33 @@ function syncState(data) {
 function handleStatusChange(statusStr, data = {}) {
     const normStatus = (statusStr || 'DISCONNECTED').toUpperCase();
     
-    // Handle Data Syncing based on Event Structure vs API Structure
-    
-    // CASE A: Disconnected Event via SSE (AppEvent::Disconnected { state })
+    // Safety check: Close modals if state changes (e.g. disconnects)
+    if (els.sasModal) els.sasModal.classList.remove('active');
+
     if (normStatus === 'DISCONNECTED' && data.state) {
         syncState(data.state);
-        // Update UI to reflect any changes in public/local IP
         renderMyInfo(true);
     }
-    // CASE B: Standard AppState via REST API (/api/state) or top-level event fields
-    // (Note: syncState calls handleStatusChange, so we avoid infinite recursion by not calling syncState back)
     
-    // Logic: Handling Disconnection Messages
-    // Simplified: Directly display message if present in the event payload
     if (normStatus === 'DISCONNECTED') {
         if (data.message) {
             showToast(data.message);
         }
     }
 
+    // Capture fingerprint from connected event if present
+    if (normStatus === 'CONNECTED' && data.fingerprint) {
+        state.fingerprint = data.fingerprint;
+    }
+
     state.connectionStatus = normStatus.toLowerCase();
     
-    // 1. Update Badge
     renderStatusBadge();
 
-    // 2. Switch Views
     els.viewHome.classList.remove('active');
     els.viewPunching.classList.remove('active');
     els.viewConnected.classList.remove('active');
 
-    // Reset buttons when state changes
     resetDisconnectButtons();
 
     if (normStatus === 'PUNCHING') {
@@ -178,10 +165,11 @@ function handleStatusChange(statusStr, data = {}) {
     } else if (normStatus === 'CONNECTED') {
         enterConnectedState(data);
     } else {
-        // DISCONNECTED
         els.viewHome.classList.add('active');
         els.submitBtn.disabled = !(state.isIpValid && state.isPortValid);
         els.submitBtn.innerText = "INITIATE LINK SEQUENCE";
+        // Reset per-session state
+        state.fingerprint = null;
     }
 }
 
@@ -195,20 +183,13 @@ function resetDisconnectButtons() {
 
 async function enterPunchingState(data) {
     els.viewPunching.classList.add('active');
-    
-    // If peer info is missing locally, we rely on fetchState or what we have.
-    // Since /api/peer is gone, we don't fetch it explicitly anymore.
-    // It should have been synced via fetchState() or previous input.
-    
     els.vizClientIp.innerText = state.fullAddress || "Unknown";
     els.vizPeerIp.innerText = state.peerAddress || "Target";
 
-    // Handle Timeout Display (from AppEvent::Punching { timeout })
     if (data.timeout !== undefined && data.timeout !== null) {
         els.punchTimeout.innerText = `${data.timeout}s`;
     }
 
-    // Handle Logs (from AppEvent::Punching { message })
     if (data.message) {
         addLog(data.message);
     }
@@ -216,13 +197,40 @@ async function enterPunchingState(data) {
 
 async function enterConnectedState(data) {
     els.viewConnected.classList.add('active');
-
-    // Update chat header with peer info
     els.chatPeerIp.innerText = state.peerAddress || "Connected Peer";
 
-    if (data.message) {
-        console.log("Connected:", data.message);
+    // Update Modal Text
+    if (state.fingerprint) {
+        els.sasDisplay.innerText = state.fingerprint;
+    } else {
+        els.sasDisplay.innerText = "VERIFYING...";
     }
+
+    // Optional: Send identity if username was set
+    // This logic handles potential double-calls of enterConnectedState
+    if (state.username) {
+        sendIdentityMessage();
+    }
+}
+
+function sendIdentityMessage() {
+    // Capture and clear immediately to prevent double-send race conditions
+    const nameToSend = state.username;
+    if (!nameToSend) return;
+    state.username = null;
+
+    // Small delay to ensure connection is ready
+    setTimeout(async () => {
+        try {
+            await fetch('/api/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: `IDENTIFIED AS: ${nameToSend}` })
+            });
+        } catch (e) {
+            console.warn("Failed to send identity", e);
+        }
+    }, 500);
 }
 
 // --- SSE (Real-time Events) ---
@@ -231,26 +239,16 @@ function connectSSE() {
         return; 
     }
 
-    // Endpoint: /api/events
     state.sseSource = new EventSource('/api/events');
 
     state.sseSource.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
             
-            // AppEvent Structure: 
-            // { status: "DISCONNECTED", state: { ... } }
-            // { status: "PUNCHING", timeout: 10, message: "..." }
-            // { status: "CONNECTED", message: "..." }
-            // { status: "MESSAGE", content: "...", from_me: true/false }
-            // { status: "CLEAR_CHAT" }
-
             if (data.status) {
                 if (data.status === 'MESSAGE') {
-                    // Handle chat message
                     addChatMessage(data.content, data.from_me);
                 } else if (data.status === 'CLEAR_CHAT') {
-                    // Handle clear chat event
                     clearChatUI();
                 } else {
                     handleStatusChange(data.status, data);
@@ -270,14 +268,9 @@ function connectSSE() {
 
 function renderNatType() {
     if (!els.natTypeDisplay) return;
-    
     const type = state.natType;
     els.natTypeDisplay.innerText = type;
-    
-    // Remove old classes
     els.natTypeDisplay.classList.remove('cone', 'symmetric');
-    
-    // Add specific color class
     if (type.toLowerCase().includes('cone')) {
         els.natTypeDisplay.classList.add('cone');
     } else if (type.toLowerCase().includes('symmetric')) {
@@ -319,7 +312,6 @@ function renderMyInfo(success) {
         els.copyBtn.style.display = 'none';
     }
 
-    // Render local IP
     if (success && state.localAddress) {
         els.myLocalIpDisplay.innerText = state.localAddress;
         els.myLocalIpDisplay.classList.remove('error');
@@ -343,7 +335,6 @@ function addLog(message) {
 // --- Chat Functions ---
 
 function clearChatUI() {
-    // Reset chat container to initial state with welcome message
     els.chatMessages.innerHTML = `
         <div class="chat-welcome">
             <div class="welcome-icon">
@@ -355,13 +346,7 @@ function clearChatUI() {
     `;
 }
 
-/**
- * Adds a chat message to the chat UI
- * @param {string} content - Message content
- * @param {boolean} fromMe - True if message was sent by the user, false if received from peer
- */
 function addChatMessage(content, fromMe) {
-    // Remove welcome message if it exists
     const welcome = els.chatMessages.querySelector('.chat-welcome');
     if (welcome) {
         welcome.remove();
@@ -387,21 +372,14 @@ function addChatMessage(content, fromMe) {
     messageDiv.appendChild(bubbleDiv);
     
     els.chatMessages.appendChild(messageDiv);
-    
-    // Auto-scroll to bottom
     els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
 }
 
-/**
- * Handles chat form submission
- */
 async function handleChatSubmit(e) {
     e.preventDefault();
-    
     const message = els.chatInput.value.trim();
     if (!message) return;
     
-    // Disable send button temporarily
     els.sendBtn.disabled = true;
     
     try {
@@ -411,11 +389,7 @@ async function handleChatSubmit(e) {
             body: JSON.stringify({ message })
         });
         
-        if (!res.ok) {
-            throw new Error('Failed to send message');
-        }
-        
-        // Clear input and refocus
+        if (!res.ok) throw new Error('Failed to send message');
         els.chatInput.value = '';
         els.chatInput.focus();
         
@@ -437,6 +411,12 @@ async function handleConnect(e) {
     const port = parseInt(els.peerPortInput.value.trim(), 10);
     state.peerAddress = `${ip}:${port}`;
 
+    // Capture optional username
+    const username = els.usernameInput.value.trim();
+    if (username) {
+        state.username = username;
+    }
+
     const btn = els.submitBtn;
     btn.innerText = "INITIATING...";
     btn.disabled = true;
@@ -450,7 +430,6 @@ async function handleConnect(e) {
         if (!res.ok) throw new Error();
         
         els.punchLogs.innerHTML = '';
-        // No longer using lastSavedMessage
 
     } catch (err) {
         showToast("CONNECTION FAILED TO START");
@@ -464,7 +443,6 @@ async function handleConnect(e) {
 async function handleDisconnect(e) {
     if(e) e.preventDefault();
     
-    // Provide immediate UI feedback to prevent double-clicks
     if(els.disconnectBtn) els.disconnectBtn.disabled = true;
     if(els.cancelPunchBtn) {
         els.cancelPunchBtn.disabled = true;
@@ -474,21 +452,25 @@ async function handleDisconnect(e) {
     try {
         const res = await fetch('/api/disconnect', { method: 'POST' });
         if (!res.ok) throw new Error("Disconnect failed");
-        
-        // Success: We do nothing here. The backend will process the request,
-        // send a command, update state, and the SSE stream will push 
-        // a "DISCONNECTED" event, which triggers `handleStatusChange` to switch the UI.
-        
     } catch (err) {
         console.error('Disconnect failed:', err);
         showToast("FAILED TO DISCONNECT");
         
-        // Re-enable buttons on failure so user can try again
         if(els.disconnectBtn) els.disconnectBtn.disabled = false;
         if(els.cancelPunchBtn) {
             els.cancelPunchBtn.disabled = false;
             els.cancelPunchBtn.innerText = "ABORT SEQUENCE";
         }
+    }
+}
+
+// --- Modal Logic ---
+function toggleSasModal(e) {
+    if (e) e.preventDefault();
+    if (els.sasModal.classList.contains('active')) {
+        els.sasModal.classList.remove('active');
+    } else {
+        els.sasModal.classList.add('active');
     }
 }
 
@@ -540,10 +522,6 @@ const validators = {
     port: (p) => { const n = parseInt(p, 10); return !isNaN(n) && n > 0 && n <= 65535; }
 };
 
-/**
- * Parses IP:Port format and populates both fields if detected.
- * Returns true if parsing happened, false otherwise.
- */
 function parseIpPort(inputValue) {
     const match = inputValue.match(/^([0-9.]+):(\d+)$/);
     if (match) {
@@ -560,10 +538,8 @@ function parseIpPort(inputValue) {
 function handleIpValidation(eventType) {
     const val = els.peerIpInput.value.trim();
     
-    // Try to parse IP:Port format on paste
     if (eventType === 'input' && val.includes(':')) {
         if (parseIpPort(val)) {
-            // Successfully parsed, validate both fields
             handleIpValidation('input');
             handlePortValidation();
             return;
@@ -624,9 +600,13 @@ function setupEventListeners() {
     
     if(els.chatForm) els.chatForm.addEventListener('submit', handleChatSubmit);
     
-    // New Disconnect Listeners
+    // Disconnect & Cancel
     if(els.disconnectBtn) els.disconnectBtn.addEventListener('click', handleDisconnect);
     if(els.cancelPunchBtn) els.cancelPunchBtn.addEventListener('click', handleDisconnect);
+
+    // Modal
+    if(els.verifyIdentityBtn) els.verifyIdentityBtn.addEventListener('click', toggleSasModal);
+    if(els.closeSasBtn) els.closeSasBtn.addEventListener('click', toggleSasModal);
 }
 
 init();

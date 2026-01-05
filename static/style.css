@@ -143,6 +143,8 @@ body:has(#view-connected.active) .vignette {
     width: 100%;
 }
 
+.title-group { display: flex; align-items: baseline; gap: 15px; }
+
 .header h1 {
     font-size: 3rem; letter-spacing: 6px; color: #fff;
     text-shadow: 0 0 20px rgba(255,255,255,0.5);
@@ -152,6 +154,16 @@ body:has(#view-connected.active) .vignette {
 
 .version { font-size: 1rem; color: var(--accent); opacity: 0.7; }
 
+/* NEW: E2EE Badge Style */
+.e2ee-badge {
+    font-family: var(--font-mono); font-size: 0.8rem;
+    color: var(--success); border: 1px solid var(--success);
+    padding: 2px 8px; border-radius: 4px;
+    background: rgba(0, 255, 157, 0.1);
+    display: flex; align-items: center; gap: 6px;
+    letter-spacing: 1px;
+}
+
 .status-badge {
     display: inline-flex; align-items: center; gap: 12px;
     font-family: var(--font-mono); font-size: 1rem; color: var(--text-dim);
@@ -159,7 +171,6 @@ body:has(#view-connected.active) .vignette {
 .status-dot { width: 10px; height: 10px; background: var(--danger); box-shadow: 0 0 10px var(--danger); transition: background-color 0.3s; }
 
 /* --- DYNAMIC STATE: Connected Header --- */
-/* Shrink the main header when connected */
 body:has(#view-connected.active) .header {
     margin-bottom: 0;
     padding: 0.5rem 2rem;
@@ -386,6 +397,34 @@ input.error { border-color: var(--danger); box-shadow: 0 0 10px rgba(255, 0, 60,
 .prompt { color: var(--accent); font-family: var(--font-mono); font-size: 1.2rem; }
 #chatInput { background: transparent; border: none; padding: 0; font-size: 1.2rem; flex: 1; }
 .btn-send { background: var(--text-main); color: #000; border: none; padding: 10px 30px; cursor: pointer; font-weight: bold; font-size: 1rem; letter-spacing: 2px; }
+
+/* NEW: Verification Modal Styles */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8); backdrop-filter: blur(5px);
+    z-index: 2000; display: none; align-items: center; justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+
+.modal-window {
+    background: var(--bg-color); border: 1px solid var(--accent);
+    width: 500px; padding: 0; box-shadow: 0 0 30px rgba(0, 243, 255, 0.2);
+}
+
+.modal-header {
+    background: rgba(0, 243, 255, 0.1); padding: 1rem 2rem;
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--accent); color: var(--accent);
+    font-weight: bold; letter-spacing: 2px;
+}
+
+.modal-body { padding: 2rem; text-align: center; }
+.sas-fingerprint {
+    font-family: var(--font-mono); font-size: 2.5rem;
+    color: #fff; margin: 1.5rem 0; letter-spacing: 5px;
+    border: 1px dashed rgba(255,255,255,0.3); padding: 1rem;
+}
+.modal-subtext { color: var(--text-dim); font-size: 0.9rem; }
 
 .toast {
     position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%);

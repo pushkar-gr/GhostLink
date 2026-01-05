@@ -1,4 +1,4 @@
-<div align="center">
+<img width="2754" height="1694" alt="image" src="https://github.com/user-attachments/assets/e6e0de94-feab-4001-b61e-47df57e828f6" /><div align="center">
   <img src="./static/banner.png" alt="GhostLink Banner" width="100%">
   
   <a href="https://github.com/pushkar-gr/ghostlink/actions">
@@ -19,9 +19,7 @@
 
 **High-Performance Serverless P2P Messaging**
 
-GhostLink is a decentralized chat application engineered for direct peer-to-peer communication. By leveraging UDP hole punching and a custom reliability layer, it eliminates the need for central relay servers, ensuring messages travel the shortest path possible between peers.
-
-This project prioritizes low-latency networking, asynchronous runtime efficiency, and clean architecture.
+GhostLink is a decentralized chat app. It connects users directly without using central servers. Direct communication reduces latency and improves performance.
 
 ---
 
@@ -29,105 +27,106 @@ This project prioritizes low-latency networking, asynchronous runtime efficiency
 
 | Version | Status       | Description                                                                                                   |
 |---------|--------------|---------------------------------------------------------------------------------------------------------------|
-| v1.0    | **Stable**   | Current release. Feature complete for text exchange and reliable UDP transport.                              |
-| v1.1    | **In Progress** | Security Hardening (QUIC). Replacing the KCP stack with QUIC (via `quinn`) to implement TLS 1.3 End-to-End Encryption. |
+| v1.0    | **Legacy**   | First release. Plaintext messaging with reliable UDP transport.                                              |
+| v1.1    | **Stable**   | **Added Security**. End-to-End Encryption (E2EE) using X25519 and ChaCha20-Poly1305 encryption.               |
 
 ---
 
-## ⚙️ Architectural Overview
+## ⚙️ Architecture
 
-GhostLink operates by decoupling the Web Interface from the P2P Networking Core, bridging them via shared thread-safe state.
+GhostLink separates the Web Interface from the P2P core. These parts communicate through thread-safe state. Version 1.1 also adds a secure handshake layer before starting a stream.
 
-[![](https://mermaid.ink/img/pako:eNqFVFtv2jAU_iuWHyYqESBcSskQUkt3QYOWNUVIW_ZgklNikdiZ7YzSqv99xwnXdWrzdI59vu87t_iZhjIC6lHHcQIRSvHAl14gCDExpOARAdKJmFoFogh4SOQ6jJkyZHyHUTpfLBXLYmt8sUbjZ0CnCjQIwwyXgozZBhSpzEZnAf1lectvDguM7C8GaJCJjPIE-vXFoL9Qg8vHPK3PmcqID-oPqC0ORPQ_QRdphlIYJRMyTZgAUrmPgVwpxsWp5DYqAVUqTzDi6HAn72PiQCYsjDmSfWBp9pEMYyYEJPqEbwJasyUXyy3dziVjueThjg6hhnzl2ki12bJ9liplxmDo26U1kfheMaEzaftdNvIOEs4WPOFmc1qefz-7KTOxVtE7Hu6bes11KLGZmxPMt-G0hKBB5qiZHfpwJLTN-1ZFoN7NuoWMN2DWUq32ObM1GdVv_8lXhiswpfzserr1yR1omatD4n6GGRCfi1XdNwpY-rZ6Gwm_xFKbMSLIpcIpGghNruBEfL-ur4_c10fN10etQw7lNpO-4-z3BPddY-FDmaZMRPqMOM7gaNVK0MHHa6z7dw7akNGUVK6kUnK97UgJtjMtYcV0nRr5nuM0Sc3eFXHHt5YOaxaW7X3pkeCGs4Q_AW6N1vavtaD9QpeYw37bSq82BnQRhqtTBtgdsld22lNmUyoDjtM7FZ5lEbM0Fd__VJ_7ZaXYS1qlS8Uj6hmVQ5WmgP-LdemzZQlo8TQF1EOzeJpoIF4QkzHxQ8p0B1MyX8bUe2CJRi8vtK45w305hOAEQQ1lLgz1Wm5BQb1n-kg9t9eqNc4vXLfTbLVb3U6VbqjnNBu13oXbcbvdntttXzTa3ZcqfSpE3VoDMW6v0eueu63OebtKIeL420_K97V8WunLX189u5E?type=png)](https://mermaid.live/edit#pako:eNqFVFtv2jAU_iuWHyYqESBcSskQUkt3QYOWNUVIW_ZgklNikdiZ7YzSqv99xwnXdWrzdI59vu87t_iZhjIC6lHHcQIRSvHAl14gCDExpOARAdKJmFoFogh4SOQ6jJkyZHyHUTpfLBXLYmt8sUbjZ0CnCjQIwwyXgozZBhSpzEZnAf1lectvDguM7C8GaJCJjPIE-vXFoL9Qg8vHPK3PmcqID-oPqC0ORPQ_QRdphlIYJRMyTZgAUrmPgVwpxsWp5DYqAVUqTzDi6HAn72PiQCYsjDmSfWBp9pEMYyYEJPqEbwJasyUXyy3dziVjueThjg6hhnzl2ki12bJ9liplxmDo26U1kfheMaEzaftdNvIOEs4WPOFmc1qefz-7KTOxVtE7Hu6bes11KLGZmxPMt-G0hKBB5qiZHfpwJLTN-1ZFoN7NuoWMN2DWUq32ObM1GdVv_8lXhiswpfzserr1yR1omatD4n6GGRCfi1XdNwpY-rZ6Gwm_xFKbMSLIpcIpGghNruBEfL-ur4_c10fN10etQw7lNpO-4-z3BPddY-FDmaZMRPqMOM7gaNVK0MHHa6z7dw7akNGUVK6kUnK97UgJtjMtYcV0nRr5nuM0Sc3eFXHHt5YOaxaW7X3pkeCGs4Q_AW6N1vavtaD9QpeYw37bSq82BnQRhqtTBtgdsld22lNmUyoDjtM7FZ5lEbM0Fd__VJ_7ZaXYS1qlS8Uj6hmVQ5WmgP-LdemzZQlo8TQF1EOzeJpoIF4QkzHxQ8p0B1MyX8bUe2CJRi8vtK45w305hOAEQQ1lLgz1Wm5BQb1n-kg9t9eqNc4vXLfTbLVb3U6VbqjnNBu13oXbcbvdntttXzTa3ZcqfSpE3VoDMW6v0eueu63OebtKIeL420_K97V8WunLX189u5E)
+[![](https://mermaid.ink/img/pako:eNp9VWtP4kAU_SuT-WA0oTwLYkUSBLIaBVkrMbvLfhjaS5nQzjTTqcoa__vedkoBYyQNncc995y5c2b6Tj3pA3WoZVkL4Umx4oGzEIToNUTgEAHS8pnaLEQesArlq7dmSpP7R4xK0mWgWLzOGj-yRv3Pgs4UJCA001wKcs-2oMjp_PZsQf9mec3vGZYY2Vv2sUEm0k9D6NWW_d5S9QdvaURcUC-IOyGuOy6AIPyvGBuYZyiFVjIks5AJIKdPayDXinFxzFlEhaAM9QQjDgZ3_C4qBzJh3ppjshMWxZdkuGZCQJh8L6WJeV3wUsX1FqVPIElYwEVginCk5YYJP1mzDRgpZfdTLUZ8teJg3UAYRkyQO9iS8RvWXwRwlK6kKla2Z5YB93bZzHC2NoGvY0FDtY21NHDTJmOBKUopWAJ8mnVrJsNto1VvkxoZjF2r2e58X5UWJn1STCSxzGxj_PAIIWdLHmKljjfJfZpPjYqslfuAe6WI6eCJjHjiSTTH9gh3N5wZGDbIM_LG-x09ICv280H5oLA-3yu3MeMU9KtUm1I3eyW3tYdPmqW3AW3o56NZ0SePkMhU7cW7eG7AJwPlnYT6cu7HJu4k0JdHOszxIL2rK4LWLpxHTocyijKbIDe5uuofONdg9n1iWYhsVA9LhWP9vLgmOC-uVcWwn6mZr2bzuaCv0zWre9OS01kqsvMRnBWZyykD3kfm2Kxq7q9pbTC8IzOWcSQ7RQeMn0Aj3KEXrJeLrs1uEjT_DmUM-rXOVpUMPI3IHbDAlGfCwPZHpJfD8OrgQsOb_orCnAcTOBZe1kVh11sNO0XoOhOb2c8EGteF8M2KP2s3V8889vGFO453366-aAhaoYHiPnW0SqFCI1ARy7r0PUu2oPmFvaAONvMLmy7EB2JiJn5LGe1gSqbBmjorFibYS3OqEWdo_KgcVehDUEOZCk2dZrebJ6HOO32jjtXpNqsX57bdPW_V7U73vF2hW-rY3WoDO912_aLdbNhd2_6o0H85b6PavrBxEv_waZx37AoFn2upJubLYz469OM_hS4Szg?type=png)](https://mermaid.live/edit#pako:eNp9VWtP4kAU_SuT-WA0oTwLYkUSBLIaBVkrMbvLfhjaS5nQzjTTqcoa__vedkoBYyQNncc995y5c2b6Tj3pA3WoZVkL4Umx4oGzEIToNUTgEAHS8pnaLEQesArlq7dmSpP7R4xK0mWgWLzOGj-yRv3Pgs4UJCA001wKcs-2oMjp_PZsQf9mec3vGZYY2Vv2sUEm0k9D6NWW_d5S9QdvaURcUC-IOyGuOy6AIPyvGBuYZyiFVjIks5AJIKdPayDXinFxzFlEhaAM9QQjDgZ3_C4qBzJh3ppjshMWxZdkuGZCQJh8L6WJeV3wUsX1FqVPIElYwEVginCk5YYJP1mzDRgpZfdTLUZ8teJg3UAYRkyQO9iS8RvWXwRwlK6kKla2Z5YB93bZzHC2NoGvY0FDtY21NHDTJmOBKUopWAJ8mnVrJsNto1VvkxoZjF2r2e58X5UWJn1STCSxzGxj_PAIIWdLHmKljjfJfZpPjYqslfuAe6WI6eCJjHjiSTTH9gh3N5wZGDbIM_LG-x09ICv280H5oLA-3yu3MeMU9KtUm1I3eyW3tYdPmqW3AW3o56NZ0SePkMhU7cW7eG7AJwPlnYT6cu7HJu4k0JdHOszxIL2rK4LWLpxHTocyijKbIDe5uuofONdg9n1iWYhsVA9LhWP9vLgmOC-uVcWwn6mZr2bzuaCv0zWre9OS01kqsvMRnBWZyykD3kfm2Kxq7q9pbTC8IzOWcSQ7RQeMn0Aj3KEXrJeLrs1uEjT_DmUM-rXOVpUMPI3IHbDAlGfCwPZHpJfD8OrgQsOb_orCnAcTOBZe1kVh11sNO0XoOhOb2c8EGteF8M2KP2s3V8889vGFO453366-aAhaoYHiPnW0SqFCI1ARy7r0PUu2oPmFvaAONvMLmy7EB2JiJn5LGe1gSqbBmjorFibYS3OqEWdo_KgcVehDUEOZCk2dZrebJ6HOO32jjtXpNqsX57bdPW_V7U73vF2hW-rY3WoDO912_aLdbNhd2_6o0H85b6PavrBxEv_waZx37AoFn2upJubLYz469OM_hS4Szg)
 
 ### Communication Flow
+[![](https://mermaid.ink/img/pako:eNqdVttu4zYQ_ZUBHwobawuSYym2HlJIdnYTpA2MVYLtdr0oGImxhEiiSlJB0iCPfesntD-3X9KhLpYd29mLYRikNWfmzOFwRk8k5BEjLpHsz5LlIZsndCVotswBP7RUPC-zGybqff1bUKGSMClorsADKuFaMoGr3ruYS_VLkt_1dw0vvas_KmNcaNv3vFRM7DEMtNE7zlcpg-Dq-nK_K7915b_iyl-T87fJ1aaXXDHg95r7wHdhEVPJwHLhPGK5StQjzBMZ6ueP0NNM-psieMOTkzeBCx9iDjSD85-h5yd5lOQreK-llKoxD4ZoOfRc-MhLoILByDwyTMOyjgzLtU3ThN6ivEmTEM4XWxH874vgdxGs6cSwLcMyTWPkOjsh9mavZZIgY40_X0gDLtijhBXLmaCKRZDykKYpKvHbyLatad94VcWRCwELS_R1xvEcF2Uexpp473Q2P4MzmkcY6Y7tKIoyvWtCwmkRswyXqaZS0ERgFiK59wbo7sbrdyL5Xwf5FchfJ59yXsBpdbR4BJnUAjUUf9JIOH0IY5qvWoZNZcGCVZXuKcWyQsnuYZtAVeY6-TyCJQk-Xi4JPFWEBzCLKX5HJjxv4ypMg9UnMV_AgoZ3TGHZidDVDM0BzKVyQR9m_wVa6y-SVayA30ITv75kvGC5hIILVfn4Gg5jf_nvn-ZWRYIXKIuP537Hoo2YeHa1DP4BGfwulV0Z_Ndl8DsJd2RwOhnsAzKk7HYzmzqTDRWc_SpswrxOBO-wCJhXvakWey-CYRhwJSjuJVZjUIYhY5HUf7cAXVCbtQYznhUpUwnPu0g_UlQHC2rbpLk7X_79GxtKyJJ7vObovGoW3kay25WCCB8wq-Q2YRLzD8VjoSlDhoMEMqrCmG1UhD-sr3VHfujNLtbl0NKmraA_WkEHq2dXFu9Azv7LnNu6QID3HSl7w1rY_Sl7LevDpTPT_jmO4SLGnh0wKXWwORK4p111bHVN3Vc32qPfh-EJBLqbR7oTi1aH5szX5n7TTQ-Yb8U4u5i_rewaQtWEeAOBF8Bb7JxMFCLJt-N8K-SVUXK0HiV4m3JZ3ePrAsWJ2B6OzRMIeNU5FIeL2QJfEVia0JuUbU-NbzPe1rk-_N6SnLE05fCBizRakkq_T7MEp49Q7EF97kAY5xO6_bzncUNjzmqfmwaVwxdBWlDNpHaKhUUGZCWSiLhKlGxAcPplVG_JkwYsidITcUlcXEZU3Gk_z4jBN6TfOc9amODlKibuLU0l7soiwmnavAuu_xVYskzMeJkr4lpH48oJcZ_IA27HtjE-to-nU9sx7bEzmQzII3GHzvHIcEzHtCam44xNZ_Q8IH9VcS1jYh_bR87UnoydsTPVCBYliotf61fSkOe3yYo8_w8n-h_M?type=png)](https://mermaid.live/edit#pako:eNqdVttu4zYQ_ZUBHwobawuSYym2HlJIdnYTpA2MVYLtdr0oGImxhEiiSlJB0iCPfesntD-3X9KhLpYd29mLYRikNWfmzOFwRk8k5BEjLpHsz5LlIZsndCVotswBP7RUPC-zGybqff1bUKGSMClorsADKuFaMoGr3ruYS_VLkt_1dw0vvas_KmNcaNv3vFRM7DEMtNE7zlcpg-Dq-nK_K7915b_iyl-T87fJ1aaXXDHg95r7wHdhEVPJwHLhPGK5StQjzBMZ6ueP0NNM-psieMOTkzeBCx9iDjSD85-h5yd5lOQreK-llKoxD4ZoOfRc-MhLoILByDwyTMOyjgzLtU3ThN6ivEmTEM4XWxH874vgdxGs6cSwLcMyTWPkOjsh9mavZZIgY40_X0gDLtijhBXLmaCKRZDykKYpKvHbyLatad94VcWRCwELS_R1xvEcF2Uexpp473Q2P4MzmkcY6Y7tKIoyvWtCwmkRswyXqaZS0ERgFiK59wbo7sbrdyL5Xwf5FchfJ59yXsBpdbR4BJnUAjUUf9JIOH0IY5qvWoZNZcGCVZXuKcWyQsnuYZtAVeY6-TyCJQk-Xi4JPFWEBzCLKX5HJjxv4ypMg9UnMV_AgoZ3TGHZidDVDM0BzKVyQR9m_wVa6y-SVayA30ITv75kvGC5hIILVfn4Gg5jf_nvn-ZWRYIXKIuP537Hoo2YeHa1DP4BGfwulV0Z_Ndl8DsJd2RwOhnsAzKk7HYzmzqTDRWc_SpswrxOBO-wCJhXvakWey-CYRhwJSjuJVZjUIYhY5HUf7cAXVCbtQYznhUpUwnPu0g_UlQHC2rbpLk7X_79GxtKyJJ7vObovGoW3kay25WCCB8wq-Q2YRLzD8VjoSlDhoMEMqrCmG1UhD-sr3VHfujNLtbl0NKmraA_WkEHq2dXFu9Azv7LnNu6QID3HSl7w1rY_Sl7LevDpTPT_jmO4SLGnh0wKXWwORK4p111bHVN3Vc32qPfh-EJBLqbR7oTi1aH5szX5n7TTQ-Yb8U4u5i_rewaQtWEeAOBF8Bb7JxMFCLJt-N8K-SVUXK0HiV4m3JZ3ePrAsWJ2B6OzRMIeNU5FIeL2QJfEVia0JuUbU-NbzPe1rk-_N6SnLE05fCBizRakkq_T7MEp49Q7EF97kAY5xO6_bzncUNjzmqfmwaVwxdBWlDNpHaKhUUGZCWSiLhKlGxAcPplVG_JkwYsidITcUlcXEZU3Gk_z4jBN6TfOc9amODlKibuLU0l7soiwmnavAuu_xVYskzMeJkr4lpH48oJcZ_IA27HtjE-to-nU9sx7bEzmQzII3GHzvHIcEzHtCam44xNZ_Q8IH9VcS1jYh_bR87UnoydsTPVCBYliotf61fSkOe3yYo8_w8n-h_M)
 
-[![](https://mermaid.ink/img/pako:eNqVVsFu20YQ_ZXpnmxUZEnKsiweXJB2ERupBcK0EaRVUWzIkUSY5LK7yzSq4d5yyye0P5cv6SxJhZIluYkOAld8M_Pe25ldPbJEpMh8pvCPGssELzO-kLyYlUAfXmtR1sU7lO26_a641FmSVbzUEABXcK9Q0tPRq6VQ-uesfDjeBU6Du98bMD0Y7K2oNco9wNiAXgmxyBHiu_vp_lThOlX4QqrwC7lwm1wLnQqNIN4b7oPQh2jJFYLrw3WKpc70Ci4zlZj3KzgyTI43TQis8_PvYx_eLAXwAq5_hKMwK9OsXMCtsVLpDh5bhLQCH96KGrhE8Jyh7diuO7Rdf-Q4DhxF9bs8S-A62qoQfluFsK_gTs7skWu7jmN7_ulOib3qjU0KElGtrIorenUdKSh4WfM8X8H7jLduyPSH-CZ-0UHPhzgr6lzzEkWt4ErQTkZ1mSyJ-nMLg7YyJMTuQcGMXYiyxETPWG9C-AKmReVCVPBTs1PkaKGM3rYexJpr7Izq-gMibPo10BqLSqv-5ZpV06wkA8uUysVvpzMGWkC4jWxQHdpwvIwg4skDamoXmfiGijOAS6V9MJtw_CzaeCezxVKDmENXsR2ORCKRViDrHH0I8lz82WQA67xJ-n-JiMznfz9145FKUSmS3RKbiiYrzIVxYIV6gxUntY014QFrwl7sc2uCXWvC3sgda057a0YHrMlxvimoFbPPmVHnzOl-ZzbzBL0xwTNjbnmC1P40XzoT5QYhEtoumoe9fW_bNgRzOoPgb9fyQKHJo8zP6wDTdXGdJKjUvM7hTnIKVjzvy3xd2x1suW1INzWf__m4tr2xCtPvSKjZfvyQKa02VIZWO4x9bSu4eL2eQr724Ou74GAH7IoJvolpYLXi9jM9vEnt4TT0jfmlqoTUcF_RVZfinjPpihQ3obFoSJG21xfR1pH0EqTPRcBf6eff4Ia2ni-oaWfsCkkivBEyT_tjrq3bYkkPG7CFzFLma1njgBUoC26W7NEEzJheYoEzZtKlXD6YPE8UQ9feL0IU6zAp6sWS-XOeK1rVVUrD013wXyDkGMoLUZea-cNhk4L5j-wD890JXVSnZ6478oYnw_FowFbMtzzHnpy5I3c8nrjjkzPnZPw0YH81RV3boRh34njDoeedjJzxgCENlJA37Z8Mmot5tmBP_wHtB3Ud?type=png)](https://mermaid.live/edit#pako:eNqVVsFu20YQ_ZXpnmxUZEnKsiweXJB2ERupBcK0EaRVUWzIkUSY5LK7yzSq4d5yyye0P5cv6SxJhZIluYkOAld8M_Pe25ldPbJEpMh8pvCPGssELzO-kLyYlUAfXmtR1sU7lO26_a641FmSVbzUEABXcK9Q0tPRq6VQ-uesfDjeBU6Du98bMD0Y7K2oNco9wNiAXgmxyBHiu_vp_lThOlX4QqrwC7lwm1wLnQqNIN4b7oPQh2jJFYLrw3WKpc70Ci4zlZj3KzgyTI43TQis8_PvYx_eLAXwAq5_hKMwK9OsXMCtsVLpDh5bhLQCH96KGrhE8Jyh7diuO7Rdf-Q4DhxF9bs8S-A62qoQfluFsK_gTs7skWu7jmN7_ulOib3qjU0KElGtrIorenUdKSh4WfM8X8H7jLduyPSH-CZ-0UHPhzgr6lzzEkWt4ErQTkZ1mSyJ-nMLg7YyJMTuQcGMXYiyxETPWG9C-AKmReVCVPBTs1PkaKGM3rYexJpr7Izq-gMibPo10BqLSqv-5ZpV06wkA8uUysVvpzMGWkC4jWxQHdpwvIwg4skDamoXmfiGijOAS6V9MJtw_CzaeCezxVKDmENXsR2ORCKRViDrHH0I8lz82WQA67xJ-n-JiMznfz9145FKUSmS3RKbiiYrzIVxYIV6gxUntY014QFrwl7sc2uCXWvC3sgda057a0YHrMlxvimoFbPPmVHnzOl-ZzbzBL0xwTNjbnmC1P40XzoT5QYhEtoumoe9fW_bNgRzOoPgb9fyQKHJo8zP6wDTdXGdJKjUvM7hTnIKVjzvy3xd2x1suW1INzWf__m4tr2xCtPvSKjZfvyQKa02VIZWO4x9bSu4eL2eQr724Ou74GAH7IoJvolpYLXi9jM9vEnt4TT0jfmlqoTUcF_RVZfinjPpihQ3obFoSJG21xfR1pH0EqTPRcBf6eff4Ia2ni-oaWfsCkkivBEyT_tjrq3bYkkPG7CFzFLma1njgBUoC26W7NEEzJheYoEzZtKlXD6YPE8UQ9feL0IU6zAp6sWS-XOeK1rVVUrD013wXyDkGMoLUZea-cNhk4L5j-wD890JXVSnZ6478oYnw_FowFbMtzzHnpy5I3c8nrjjkzPnZPw0YH81RV3boRh34njDoeedjJzxgCENlJA37Z8Mmot5tmBP_wHtB3Ud)
-
-1. **Initialization**: The application starts the Axum web server and the Tokio UDP listener simultaneously.
-2. **Discovery**: The UDP layer queries a STUN server to resolve the machine's Public IP and punch a NAT hole.
-3. **Signaling**: The user manually exchanges Public IPs with a peer via the Web UI.
-4. **Transport**: Messages are routed from the UI → Shared State → KCP Stream → Peer.
-
----
-
-## 🚀 Key Technical Features
-
-- **True Peer-to-Peer**: Direct client-to-client connections minimize latency and remove dependency on third-party infrastructure.
-- **Reliable UDP (ARQ)**: Utilizes KCP (via `tokio_kcp`) to provide TCP-like reliability with the speed advantages of UDP.
-- **Automated NAT Traversal**: Integrated STUN client allows for seamless connectivity across different network configurations without manual port forwarding.
-- **Asynchronous Core**: Built entirely on the Tokio runtime for non-blocking I/O and high concurrency.
-- **Real-Time Updates**: State changes are pushed to the browser immediately via Server-Sent Events (SSE).
+Steps:
+1. **Initialization**: The app starts an HTTP web server and a UDP listener.
+2. **Discovery**: The UDP layer uses a STUN server to get the public IP and open a connection.
+3. **Secure Handshake**: Peers exchange public keys over UDP.
+4. **Transport**: A reliable, encrypted stream is created for data transfer.
 
 ---
 
-## 🛠️ Technology Stack
+## 🚀 Features
 
-| Component     | Technology    | Role                                                 |
-|---------------|---------------|-----------------------------------------------------|
-| Runtime       | Tokio         | Asynchronous I/O scheduler and task management.     |
-| Transport     | Tokio KCP     | Reliable UDP protocol implementation.               |
-| Web Framework | Axum          | HTTP/REST interface and SSE stream handling.        |
-| State         | Arc/RwLock    | Thread-safe state synchronization between tasks.    |
-| Discovery     | STUN          | Public IP resolution and NAT hole punching.         |
-
----
-
-## 🔒 Security Notice
-
-> **WARNING**: *Protocol Status: Cleartext*
-
-GhostLink v1.0 transmits data in plain text. While the transport layer provides reliability, it does not currently implement end-to-end encryption.
-
-Do not transmit sensitive data (PII, credentials, financial information) over this version. Encryption is slated for the v1.1 release cycle (via QUIC).
+- **End-to-End Encryption**: Uses X25519 keys and HKDF for secure communication.
+- **Forward Secrecy**: Creates session keys for each connection.
+- **Identity Verification**: Shows SAS codes so users can verify connections.
+- **Reliable UDP**: Uses KCP for fast, reliable transport.
+- **NAT Traversal**: Connects through networks using STUN.
+- **Real-Time Updates**: Sends live updates to the web UI using SSE.
 
 ---
 
-## 📦 Installation & Usage
+## 🛠️ Technology
 
-### Prerequisites
+| Component     | Technology             | Purpose                                           |
+|---------------|------------------------|--------------------------------------------------|
+| Runtime       | Tokio                  | Manages I/O and tasks.                          |
+| Transport     | Tokio KCP              | Handles reliable UDP communication.             |
+| Cryptography  | RustCrypto             | Provides secure key and encryption functions.   |
+| Web Framework | Axum                   | HTTP REST API and real-time event streaming.    |
+| State         | Arc/RwLock             | Ensures thread-safe state management.           |
+| Discovery     | STUN                   | Resolves public IPs and opens connections.      |
 
-Ensure you have the latest stable version of Rust and Cargo installed.
+---
+
+## 🔒 Security
+
+**STATUS: Encrypted**
+
+GhostLink v1.1 uses encryption to secure data:
+- **Key Exchange**: Uses X25519 elliptic-curve.
+- **Ciphers**: Uses ChaCha20-Poly1305 or AES-256-GCM.
+- **Verification**: Users can check fingerprints to avoid interception.
+
+Private keys are only stored in memory and never sent or saved.
+
+---
+
+## 📦 Installation
+
+### Requirements
+
+Install the latest versions of Rust and Cargo.
 
 ### Quick Start
 
-**Step 1**: Clone the repository.
-```bash
-git clone https://github.com/pushkar-gr/ghostlink.git
-cd ghostlink
-```
-
-**Step 2**: Build and run.
-```bash
-cargo run --release
-```
-
-The first build may take a moment to compile dependencies.
-
-**Step 3**: Initiate Connection.
-- Navigate to `http://localhost:8080` in your web browser.
-- Copy your Public IP displayed on the dashboard.
-- Share your IP with a friend and input their IP into the Target Address field.
-- Click **Establish Link**.
+1. **Clone the repo**:
+    ```bash
+    git clone https://github.com/pushkar-gr/ghostlink.git
+    cd ghostlink
+    ```
+2. **Build and run**:
+    ```bash
+    cargo run --release
+    ```
+3. **Create a connection**:
+    - Open `http://localhost:8080` in your browser.
+    - Copy your public IP.
+    - Share it with a peer.
+    - Set an optional alias.
+    - Press **Establish Link**.
+    - Verify the fingerprint matches your peer’s.
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! 🚀
-
 1. Fork the repository.
-2. Create a feature branch.
+2. Create a branch:
    ```bash
-   git checkout -b feature/amazing-feature
+   git checkout -b feature/example-feature
    ```
-3. Commit your changes.
+3. Make and commit your changes:
    ```bash
-   git commit -m "Add some amazing feature"
+   git commit -m "Explain the feature"
    ```
-4. Push to the branch.
+4. Push the branch:
    ```bash
-   git push origin feature/amazing-feature
+   git push origin feature/example-feature
    ```
 5. Open a Pull Request.
 
@@ -135,8 +134,8 @@ We welcome contributions! 🚀
 
 ## 📄 License
 
-This project is open-source and available under the **GNU General Public License v3.0**. See the [LICENSE](./LICENSE) file for details.
+This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](./LICENSE) file for details.
 
 ---
 
-*Happy Chatting!* 👻
+*Start chatting today!* 👻

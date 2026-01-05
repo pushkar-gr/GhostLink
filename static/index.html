@@ -11,7 +11,6 @@
 </head>
 <body>
 
-    <!-- Visual Effects -->
     <div class="crt-overlay"></div>
     <div class="scanlines"></div>
     <div class="vignette"></div>
@@ -27,7 +26,10 @@
             <header class="header">
                 <div class="header-content">
                     <div class="title-group">
-                        <h1>GHOSTLINK <span class="version">v1.0</span></h1>
+                        <h1>GHOSTLINK <span class="version">v1.1</span></h1>
+                        <div class="e2ee-badge">
+                            <span class="lock-icon">🔒</span> END-TO-END ENCRYPTED
+                        </div>
                     </div>
                     <div class="status-badge" id="statusBadge">
                         <span class="status-dot"></span>
@@ -36,7 +38,6 @@
                 </div>
             </header>
 
-            <!-- VIEW: HOME (Disconnected) -->
             <div id="view-home" class="view-section active">
                 <div class="dashboard-grid">
                     <div class="dashboard-col left">
@@ -51,7 +52,7 @@
                                     <div class="info-label">PUBLIC_ENDPOINT</div>
                                     <div class="info-val-group large">
                                         <span class="ip-text" id="myIpDisplay">--.--.--.--</span>
-                                        <button class="icon-btn" id="copyBtn">COPY</button>
+                                        <button class="icon-btn" id="copyBtn" type="button">COPY</button>
                                     </div>
                                 </div>
 
@@ -59,7 +60,7 @@
                                     <div class="info-label">LOCAL_ENDPOINT</div>
                                     <div class="info-val-group large">
                                         <span class="ip-text" id="myLocalIpDisplay">--.--.--.--</span>
-                                        <button class="icon-btn" id="copyLocalBtn">COPY</button>
+                                        <button class="icon-btn" id="copyLocalBtn" type="button">COPY</button>
                                     </div>
                                 </div>
                                 <div id="apiErrorMsg" class="error-msg"></div>
@@ -73,6 +74,11 @@
                                 <span class="panel-title">TARGET_ACQUISITION</span>
                             </div>
                             <form id="connectForm" class="connect-form-layout">
+                                <div class="input-group" style="margin-bottom: 1.5rem;">
+                                    <label>SESSION_ALIAS (OPTIONAL)</label>
+                                    <input type="text" id="usernameInput" placeholder="CODENAME" autocomplete="off" maxlength="20">
+                                </div>
+
                                 <div class="input-grid">
                                     <div class="input-group">
                                         <label>TARGET_IP</label>
@@ -95,7 +101,6 @@
                 </div>
             </div>
 
-            <!-- VIEW: PUNCHING (Connecting) -->
             <div id="view-punching" class="view-section">
                 <div class="punch-grid">
                     <div class="matchmaking-column">
@@ -104,17 +109,15 @@
                             <div class="match-ring-inner"></div>
                             <div class="timer-container">
                                 <div class="timer-label">ESTABLISHING TUNNEL...</div>
-                                <!-- ID matches static/script.js logic -->
                                 <div class="timer-value" id="punchTimeout">--s</div>
                             </div>
                         </div>
                         
-                        <!-- Hidden elements required by static logic -->
                         <div id="vizClientIp" style="display: none;"></div>
                         <div id="vizPeerIp" style="display: none;"></div>
 
                         <div class="abort-container">
-                             <button id="cancelPunchBtn" class="btn-secondary">ABORT SEQUENCE</button>
+                             <button id="cancelPunchBtn" class="btn-secondary" type="button">ABORT SEQUENCE</button>
                         </div>
                     </div>
 
@@ -129,7 +132,6 @@
                 </div>
             </div>
 
-            <!-- VIEW: CONNECTED (Chat) -->
             <div id="view-connected" class="view-section">
                 <div class="chat-interface">
                     <div class="chat-header">
@@ -140,7 +142,10 @@
                                 <div class="peer-ip" id="chatPeerIp">...</div>
                             </div>
                         </div>
-                        <button id="disconnectBtn" class="btn-danger">TERMINATE UPLINK</button>
+                        <div class="header-actions">
+                            <button id="verifyIdentityBtn" class="icon-btn" style="margin-right: 15px;" type="button">VERIFY FINGERPRINT</button>
+                            <button id="disconnectBtn" class="btn-danger" type="button">TERMINATE UPLINK</button>
+                        </div>
                     </div>
                     
                     <div class="chat-viewport" id="chatMessages">
@@ -157,7 +162,20 @@
         </div>
     </div>
 
-    <!-- Toast Notification -->
+    <div id="sasModal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-header">
+                <span>IDENTITY_VERIFICATION</span>
+                <button id="closeSasBtn" class="icon-btn" type="button">X</button>
+            </div>
+            <div class="modal-body">
+                <p>COMPARE THIS FINGERPRINT WITH YOUR PEER TO VERIFY E2EE INTEGRITY:</p>
+                <div class="sas-fingerprint" id="sasDisplay">-- -- --</div>
+                <p class="modal-subtext">IF THESE CODES MATCH, THE CONNECTION IS SECURE.</p>
+            </div>
+        </div>
+    </div>
+
     <div class="toast" id="toast">
         <span class="toast-msg">ALERT</span>
     </div>
