@@ -1,4 +1,4 @@
-<img width="2754" height="1694" alt="image" src="https://github.com/user-attachments/assets/e6e0de94-feab-4001-b61e-47df57e828f6" /><div align="center">
+<div align="center">
   <img src="./static/banner.png" alt="GhostLink Banner" width="100%">
   
   <a href="https://github.com/pushkar-gr/ghostlink/actions">
