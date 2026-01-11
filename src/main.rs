@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     info!("Starting GhostLink v1.1 (Secure)");
 
     // 2. Load configuration
-    let config = Config::load();
+    let config = Config::load()?;
     debug!("Configuration loaded: {:?}", config);
 
     // 3. Bind UDP socket

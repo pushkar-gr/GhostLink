@@ -27,7 +27,7 @@ GhostLink is a decentralized chat app. It connects users directly without using 
 
 | Version | Status       | Description                                                                                                   |
 |---------|--------------|---------------------------------------------------------------------------------------------------------------|
-| v1.0    | **Legacy**   | First release. Plaintext messaging with reliable UDP transport.                                              |
+| v1.0    | **Legacy**   | First release. Plaintext messaging with reliable UDP transport.                                               |
 | v1.1    | **Stable**   | **Added Security**. End-to-End Encryption (E2EE) using X25519 and ChaCha20-Poly1305 encryption.               |
 
 ---
@@ -57,6 +57,77 @@ Steps:
 - **Reliable UDP**: Uses KCP for fast, reliable transport.
 - **NAT Traversal**: Connects through networks using STUN.
 - **Real-Time Updates**: Sends live updates to the web UI using SSE.
+
+---
+
+
+## ⚙️ Configuration
+
+GhostLink can be configured using a configuration file, command-line arguments, or both. Configuration is applied in the following order of precedence (highest to lowest):
+
+1. **Command-line arguments** (highest priority)
+2. **Configuration file** (`config.toml`)
+3. **Built-in defaults** (lowest priority)
+
+### Configuration File
+
+```toml
+# UDP port for client connections (0 = auto-assign)
+client_port = 0
+
+# STUN server for NAT traversal
+stun_server = "stun.l.google.com:19302"
+
+# STUN verifier for NAT type detection
+stun_verifier = "stun4.l.google.com:19302"
+
+# HTTP web server port
+web_port = 8080
+
+# Handshake timeout in seconds
+handshake_timeout_secs = 30
+
+# NAT keep-alive interval in seconds
+punch_hole_secs = 15
+
+# Disconnect timeout in milliseconds
+disconnect_timeout_ms = 500
+
+# Encryption mode: "chacha20poly1305" or "aes256gcm"
+encryption_mode = "chacha20poly1305"
+```
+
+### Command-Line Arguments
+
+You can override any configuration option using command-line arguments:
+
+```bash
+# Show all available options
+cargo run --release -- --help
+
+# Use a custom configuration file
+cargo run --release -- --config /path/to/config.toml
+
+# Override specific settings
+cargo run --release -- --web-port 9000 --client-port 5000
+
+# Combine config file with overrides
+cargo run --release -- --config myconfig.toml --encryption-mode aes256gcm
+```
+
+### Available Options
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--config` | `-c` | Path to configuration file | `config.toml` |
+| `--client-port` | `-p` | UDP port for client connections (0 = auto) | `0` |
+| `--stun-server` | `-s` | STUN server address | `stun.l.google.com:19302` |
+| `--stun-verifier` | `-v` | STUN verifier address | `stun4.l.google.com:19302` |
+| `--web-port` | `-w` | HTTP web server port | `8080` |
+| `--handshake-timeout-secs` | `-t` | Handshake timeout in seconds | `30` |
+| `--punch-hole-secs` | `-k` | NAT keep-alive interval in seconds | `15` |
+| `--disconnect-timeout-ms` | `-d` | Disconnect timeout in milliseconds | `500` |
+| `--encryption-mode` | `-e` | Encryption mode (chacha20poly1305 or aes256gcm) | `chacha20poly1305` |
 
 ---
 
