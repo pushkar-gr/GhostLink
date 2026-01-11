@@ -1,0 +1,38 @@
+# GhostLink Configuration File
+#
+# All fields are optional - if not specified, default values will be used.
+# Command-line arguments will override values specified in this file.
+
+# UDP port for client connections (0 = auto-assign a random port)
+# Default: 0
+client_port = 0
+
+# STUN server address for NAT traversal and public IP resolution
+# Default: "stun.l.google.com:19302"
+stun_server = "stun.l.google.com:19302"
+
+# STUN verifier address for NAT type detection
+# Default: "stun4.l.google.com:19302"
+stun_verifier = "stun4.l.google.com:19302"
+
+# HTTP web server port for the web interface
+# Default: 8080
+web_port = 8080
+
+# Handshake timeout in seconds
+# Default: 30
+handshake_timeout_secs = 30
+
+# NAT keep-alive interval in seconds
+# Periodic STUN requests to maintain NAT mapping
+# Default: 15
+punch_hole_secs = 15
+
+# Disconnect timeout in milliseconds
+# Grace period before forced shutdown
+# Default: 500
+disconnect_timeout_ms = 500
+
+# Encryption mode: "chacha20poly1305" or "aes256gcm"
+# Default: "chacha20poly1305"
+encryption_mode = "chacha20poly1305"
